@@ -46,6 +46,11 @@ android {
             }
         }
     }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -61,10 +66,10 @@ android {
         }
         getByName("release") {
             signingConfig = signingConfigs.getByName("release")
-            optimization {
-               enable = true
-            }
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
                 *fileTree(".") {
                   include("**/*.pro")
                   exclude("build/**")

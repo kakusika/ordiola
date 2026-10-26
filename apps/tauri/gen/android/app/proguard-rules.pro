@@ -19,3 +19,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Tauri core & plugins reflection / JNI
+-keep class app.tauri.** { *; }
+-keep class com.tomet.telaion.** { *; }
+
+# WebView JavascriptInterface
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}

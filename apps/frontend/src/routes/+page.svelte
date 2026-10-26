@@ -2,12 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
-
-  interface FileEntry {
-    name: string;
-    path: string;
-    is_dir: boolean;
-  }
+  import FileTreeNode, { type FileEntry } from "$lib/FileTreeNode.svelte";
 
   interface VaultEntry {
     name: string;
@@ -38,20 +33,18 @@
   let isVaultMenuOpen = $state<boolean>(false);
   let customVaultInput = $state<string>("");
 
+  // File Tree Explorer State
+  let rootEntries = $state<FileEntry[]>([]);
+  let expandedPaths = $state<Set<string>>(new Set());
+  let isRefreshing = $state<boolean>(false);
+  let unlistenWatcher: (() => void) | null = null;
+
   // Document metadata state
   let docMeta = $state<{ id: string; title: string; lang: string }>({
     id: "doc-telaion",
     title: "Telaion ワークスペース",
     lang: "ja",
   });
-
-  // Workspace files list
-  let files = $state<Array<FileEntry>>([
-    { name: "tmtroot/readme.tmt", path: "tmtroot/readme.tmt", is_dir: false },
-    { name: "tmtroot/agents.tmt", path: "tmtroot/agents.tmt", is_dir: false },
-    { name: "tmtroot/contributing.tmt", path: "tmtroot/contributing.tmt", is_dir: false },
-    { name: "default.config.tmt", path: "default.config.tmt", is_dir: false },
-  ]);
 
   const defaultContent = `
     <h1>=[ Telaion: 次世代 Tomet エディタ ]=</h1>
@@ -106,6 +99,25 @@
     // Load initial vault and workspace files via Tauri IPC
     if (isTauri) {
       await initVault();
+      setupFileWatcher();
+    } else {
+      // Mock entries for browser dev
+      rootEntries = [
+        {
+          name: "tmtroot",
+          path: "tmtroot",
+          relative_path: "tmtroot",
+          is_dir: true,
+          has_children: true,
+          isExpanded: true,
+          children: [
+            { name: "readme.tmt", path: "tmtroot/readme.tmt", relative_path: "tmtroot/readme.tmt", is_dir: false, has_children: false },
+            { name: "agents.tmt", path: "tmtroot/agents.tmt", relative_path: "tmtroot/agents.tmt", is_dir: false, has_children: false },
+            { name: "contributing.tmt", path: "tmtroot/contributing.tmt", relative_path: "tmtroot/contributing.tmt", is_dir: false, has_children: false },
+          ]
+        },
+        { name: "default.config.tmt", path: "default.config.tmt", relative_path: "default.config.tmt", is_dir: false, has_children: false },
+      ];
     }
 
     // Register global keyboard shortcuts (Ctrl+S / Cmd+S)
@@ -116,6 +128,9 @@
     if (typeof window !== "undefined") {
       window.removeEventListener("keydown", handleKeydown);
     }
+    if (unlistenWatcher) {
+      unlistenWatcher();
+    }
     editor?.destroy();
   });
 
@@ -123,6 +138,21 @@
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
       saveCurrentDocument();
+    }
+  }
+
+  async function setupFileWatcher() {
+    if (!isTauri) return;
+    try {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlistenWatcher = await listen<string[]>("workspace:changed", async (event) => {
+        console.log("Workspace changed on disk:", event.payload);
+        statusMessage = "外部変更を検知: エクスプローラーを更新中...";
+        await refreshWorkspace();
+        statusMessage = "エクスプローラー最新";
+      });
+    } catch (err: any) {
+      console.warn("Watcher listener setup warning:", err);
     }
   }
 
@@ -157,14 +187,14 @@
       vaultName = res.state.current_name;
       vaultPath = res.state.current_path;
       recentVaults = res.state.recent_vaults;
-      files = res.files.filter(f => f.path.endsWith(".tmt"));
+      expandedPaths.clear();
+      rootEntries = res.files || [];
       customVaultInput = "";
 
-      statusMessage = `Vault 開封: ${vaultName} (${files.length} ファイル)`;
+      statusMessage = `Vault 開封: ${vaultName}`;
 
-      if (files.length > 0) {
-        await openDocument(files[0].path);
-      }
+      // Automatically auto-expand tmtroot if present and open first .tmt
+      await autoOpenInitialDocument(rootEntries);
     } catch (err: any) {
       console.error("Switch vault error:", err);
       statusMessage = `Vault 切り替えエラー: ${err?.message || err}`;
@@ -175,19 +205,103 @@
     if (!isTauri) return;
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const result = await invoke<FileEntry[]>("open_workspace", { path: null });
-      if (Array.isArray(result) && result.length > 0) {
-        files = result.filter(f => f.path.endsWith(".tmt"));
-        // Automatically open readme or first file
-        const target = files.find(f => f.name.includes("readme")) || files[0];
-        if (target) {
-          await openDocument(target.path);
-        }
-      }
+      const entries = await invoke<FileEntry[]>("list_directory", { path: null });
+      rootEntries = entries || [];
+      await autoOpenInitialDocument(rootEntries);
     } catch (err: any) {
       console.error("Workspace load error:", err);
       statusMessage = `ファイル走査失敗: ${err?.message || err}`;
     }
+  }
+
+  async function autoOpenInitialDocument(entries: FileEntry[]) {
+    // 1. If tmtroot exists, expand it automatically
+    const tmtroot = entries.find(e => e.name === "tmtroot" && e.is_dir);
+    if (tmtroot) {
+      await toggleDirectory(tmtroot);
+      const target = tmtroot.children?.find(c => c.name.includes("readme.tmt")) || tmtroot.children?.[0];
+      if (target && !target.is_dir) {
+        await openDocument(target.path || target.relative_path);
+        return;
+      }
+    }
+
+    // 2. Otherwise open first available .tmt in root
+    const rootTmt = entries.find(e => e.name.endsWith(".tmt") && !e.is_dir);
+    if (rootTmt) {
+      await openDocument(rootTmt.path || rootTmt.relative_path);
+    }
+  }
+
+  async function refreshWorkspace() {
+    if (!isTauri || isRefreshing) return;
+    isRefreshing = true;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const entries = await invoke<FileEntry[]>("list_directory", { path: null });
+
+      // Recursively re-expand paths that were already open
+      await rehydrateExpanded(entries, expandedPaths);
+      rootEntries = entries;
+    } catch (err: any) {
+      console.error("Failed to refresh workspace:", err);
+    } finally {
+      isRefreshing = false;
+    }
+  }
+
+  async function rehydrateExpanded(entries: FileEntry[], openPaths: Set<string>) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    for (const entry of entries) {
+      if (entry.is_dir && openPaths.has(entry.relative_path)) {
+        try {
+          const children = await invoke<FileEntry[]>("list_directory", { path: entry.relative_path });
+          entry.children = children;
+          entry.isExpanded = true;
+          if (children.length > 0) {
+            await rehydrateExpanded(children, openPaths);
+          }
+        } catch (e) {
+          console.error("Rehydrate error on", entry.relative_path, e);
+        }
+      }
+    }
+  }
+
+  async function toggleDirectory(entry: FileEntry) {
+    if (!entry.is_dir) return;
+
+    if (entry.isExpanded) {
+      entry.isExpanded = false;
+      expandedPaths.delete(entry.relative_path);
+      return;
+    }
+
+    // Lazy load children on demand
+    entry.isLoading = true;
+    if (!isTauri) {
+      entry.isExpanded = true;
+      entry.isLoading = false;
+      expandedPaths.add(entry.relative_path);
+      return;
+    }
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const children = await invoke<FileEntry[]>("list_directory", { path: entry.relative_path });
+      entry.children = children || [];
+      entry.isExpanded = true;
+      expandedPaths.add(entry.relative_path);
+    } catch (err: any) {
+      console.error("Failed to list directory:", err);
+      statusMessage = `ディレクトリ展開エラー: ${err?.message || err}`;
+    } finally {
+      entry.isLoading = false;
+    }
+  }
+
+  async function handleFileSelect(file: FileEntry) {
+    await openDocument(file.path || file.relative_path);
   }
 
   async function openDocument(filePath: string) {
@@ -245,7 +359,7 @@
 </script>
 
 <div class="flex h-screen w-screen overflow-hidden bg-stone-950 text-stone-200 select-none">
-  <!-- Left Sidebar: Workspace Vault -->
+  <!-- Left Sidebar: Workspace Vault & Lazy Tree Explorer -->
   <aside class="w-68 border-r border-stone-800 bg-stone-900/60 flex flex-col shrink-0 relative">
     <!-- Vault Header & Switcher Trigger -->
     <div class="p-3 border-b border-stone-800 relative">
@@ -336,22 +450,37 @@
       {/if}
     </div>
 
-    <!-- Workspace Tree -->
-    <div class="p-3 flex-1 overflow-y-auto space-y-1 text-sm">
-      <div class="px-2 py-1 text-[11px] font-semibold text-stone-400 uppercase tracking-wider flex items-center justify-between">
-        <span>Tomet Files</span>
-        <span class="text-[10px] text-stone-400 font-mono">{files.length}</span>
-      </div>
-
-      {#each files as file}
+    <!-- Explorer Section Header -->
+    <div class="px-3 pt-3 pb-1 flex items-center justify-between text-stone-400 border-b border-stone-800/50">
+      <span class="text-[10px] font-bold tracking-wider uppercase text-stone-400">Explorer</span>
+      <div class="flex items-center gap-1">
         <button
-          class="w-full text-left px-2.5 py-1.5 rounded-md flex items-center gap-2 transition text-xs {activePath === file.path ? 'bg-stone-800 text-white font-medium shadow-sm' : 'text-stone-400 hover:bg-stone-800/60 hover:text-stone-300'}"
-          onclick={() => openDocument(file.path)}
+          class="p-1 rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition text-xs"
+          onclick={refreshWorkspace}
+          title="エクスプローラーを再読み込み"
         >
-          <span class="text-sm">📄</span>
-          <span class="truncate font-mono text-[11px]">{file.name}</span>
+          <span class="inline-block {isRefreshing ? 'animate-spin' : ''}">🔄</span>
         </button>
-      {/each}
+      </div>
+    </div>
+
+    <!-- Lazy Loading Tree Explorer Area -->
+    <div class="p-2 flex-1 overflow-y-auto space-y-0.5">
+      {#if rootEntries.length === 0}
+        <div class="text-stone-500 text-xs p-3 text-center italic font-mono">
+          ファイルが見つかりません
+        </div>
+      {:else}
+        {#each rootEntries as entry (entry.path || entry.relative_path)}
+          <FileTreeNode
+            {entry}
+            {activePath}
+            depth={0}
+            onSelectFile={handleFileSelect}
+            onToggleDir={toggleDirectory}
+          />
+        {/each}
+      {/if}
     </div>
 
     <!-- Bottom Status / Diagnostics -->
@@ -361,7 +490,7 @@
         <span class="font-mono text-emerald-400">{isTauri ? "Tauri v3 IPC" : "Web (Vite)"}</span>
       </div>
       {#if statusMessage}
-        <div class="text-[10px] text-stone-400 truncate" title={statusMessage}>
+        <div class="text-[10px] text-stone-400 truncate font-mono" title={statusMessage}>
           {statusMessage}
         </div>
       {/if}

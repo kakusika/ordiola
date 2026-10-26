@@ -53,12 +53,29 @@ android-build *ARGS:
     find apps/tauri/gen/android/app/build/outputs/apk -name "*debug*.apk" -exec cp --remove-destination {} {{dist}}/telaion-debug.apk \;
     @echo "Built: {{dist}}/telaion-debug.apk"
 
-# Build Android APK (release) and copy into dist/
+android_cflags := "-fno-unwind-tables -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections"
+android_rustflags := "-C force-unwind-tables=no -C link-arg=-Wl,--icf=all -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all"
+
+# Build Android APK (release, aarch64 by default) and copy into dist/
 android-release *ARGS:
-    pnpm tauri android build --apk {{ARGS}}
-    @mkdir -p {{dist}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=("{{ARGS}}")
+    target_opt=""
+    if [[ ! " ${args[*]} " =~ " -t " && ! " ${args[*]} " =~ " --target " ]]; then
+        target_opt="-t aarch64"
+    fi
+    RUSTFLAGS="{{android_rustflags}}" CFLAGS="{{android_cflags}}" pnpm tauri android build --apk ${target_opt} {{ARGS}}
+    mkdir -p {{dist}}
     find apps/tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp --remove-destination {} {{dist}}/telaion.apk \;
-    @echo "Built: {{dist}}/telaion.apk"
+    echo "Built: {{dist}}/telaion.apk"
+
+# Build Android fat APK containing all architectures
+android-release-universal *ARGS:
+    RUSTFLAGS="{{android_rustflags}}" CFLAGS="{{android_cflags}}" pnpm tauri android build --apk {{ARGS}}
+    @mkdir -p {{dist}}
+    find apps/tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp --remove-destination {} {{dist}}/telaion-universal.apk \;
+    @echo "Built: {{dist}}/telaion-universal.apk"
 
 # Install the built debug APK on connected Android device/emulator
 android-install:
