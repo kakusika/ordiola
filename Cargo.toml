@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-  "apps/tauri/src-tauri",
+  "apps/tauri",
   "crates/telaion-config",
   "crates/telaion-core",
 ]
 
-default-members = ["apps/tauri/src-tauri"]
+default-members = ["apps/tauri"]
 
 [workspace.package]
 version = "0.1.0"

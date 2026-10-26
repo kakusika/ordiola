@@ -33,7 +33,7 @@ desktop-dev:
 desktop-release:
     pnpm tauri build --no-bundle
     @mkdir -p {{dist}}
-    cp target/release/telaion {{dist}}/telaion
+    cp --remove-destination target/release/telaion {{dist}}/telaion
     @echo "Built: {{dist}}/telaion"
 
 # Build and run desktop release binary (with optional vault path)
@@ -50,14 +50,14 @@ android-dev *ARGS:
 android-build *ARGS:
     pnpm tauri android build --debug --apk {{ARGS}}
     @mkdir -p {{dist}}
-    find apps/tauri/src-tauri/gen/android/app/build/outputs/apk -name "*debug*.apk" -exec cp {} {{dist}}/telaion-debug.apk \;
+    find apps/tauri/gen/android/app/build/outputs/apk -name "*debug*.apk" -exec cp --remove-destination {} {{dist}}/telaion-debug.apk \;
     @echo "Built: {{dist}}/telaion-debug.apk"
 
 # Build Android APK (release) and copy into dist/
 android-release *ARGS:
     pnpm tauri android build --apk {{ARGS}}
     @mkdir -p {{dist}}
-    find apps/tauri/src-tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp {} {{dist}}/telaion.apk \;
+    find apps/tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp --remove-destination {} {{dist}}/telaion.apk \;
     @echo "Built: {{dist}}/telaion.apk"
 
 # Install the built debug APK on connected Android device/emulator

@@ -8,7 +8,7 @@
     "beforeDevCommand": "pnpm --filter @telaion/frontend dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm --filter @telaion/frontend build",
-    "frontendDist": "../../frontend/build"
+    "frontendDist": "../frontend/build"
   },
   "app": {
     "withGlobalTauri": true,
