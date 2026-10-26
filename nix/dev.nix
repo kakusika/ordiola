@@ -20,7 +20,9 @@ let
 
   runtimeLibraries = with pkgs; [
     gtk3
+    gtk4
     webkitgtk_4_1
+    webkitgtk_6_0
     glib
     glib-networking
     gdk-pixbuf
@@ -40,27 +42,30 @@ let
   runtimeLibPath = lib.makeLibraryPath runtimeLibraries;
 in
 mkShell rec {
-  buildInputs = with pkgs; [
-    #= Ecosystem Tools (sisho, tomet, twrit, catasto)
-    tools
-    just
+  buildInputs =
+    with pkgs;
+    [
+      #= Ecosystem Tools (sisho, tomet, twrit, catasto)
+      tools
+      just
 
-    #= Rust
-    rustToolchain
-    cargo-edit
-    cargo-nextest
+      #= Rust
+      rustToolchain
+      cargo-edit
+      cargo-nextest
 
-    #= Frontend (Node & pnpm)
-    nodejs
-    pnpm
+      #= Frontend (Node & pnpm)
+      nodejs
+      pnpm
 
-    #= Tauri v2 Build Tools
-    cargo-tauri
-    pkg-config
-    gobject-introspection
-  ] ++ runtimeLibraries;
+      #= Tauri v2 Build Tools
+      cargo-tauri
+      pkg-config
+      gobject-introspection
+    ]
+    ++ runtimeLibraries;
 
-  PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.dbus.dev}/lib/pkgconfig";
+  PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.dbus.dev}/lib/pkgconfig:${pkgs.webkitgtk_6_0.dev}/lib/pkgconfig:${pkgs.gtk4.dev}/lib/pkgconfig";
   LD_LIBRARY_PATH = runtimeLibPath;
 
   # Embed RPATH into compiled binaries so they run without LD_LIBRARY_PATH

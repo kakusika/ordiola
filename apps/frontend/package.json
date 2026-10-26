@@ -14,8 +14,8 @@
   "dependencies": {
     "@lucide/svelte": "^1.23.0",
     "@tailwindcss/vite": "^4.0.0",
-    "@tauri-apps/api": "^2.1.1",
-    "@tauri-apps/plugin-opener": "^2.1.0",
+    "@tauri-apps/api": "^3.0.0-alpha.3",
+    "@tauri-apps/plugin-opener": "^3.0.0-alpha.3",
     "@tiptap/core": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
@@ -25,6 +25,7 @@
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.16.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@tauri-apps/cli": "^3.0.0-alpha.5",
     "@types/node": "^22.0.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",

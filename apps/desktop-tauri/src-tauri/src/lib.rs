@@ -1,6 +1,6 @@
 use std::path::Path;
 use telaion_core::{
-    prosemirror_to_tomet, scan_workspace, tomet_to_prosemirror, FileEntry, ProseMirrorDoc,
+    FileEntry, ProseMirrorDoc, prosemirror_to_tomet, scan_workspace, tomet_to_prosemirror,
 };
 
 #[tauri::command]
@@ -23,7 +23,17 @@ fn write_tomet_document(path: &str, doc: ProseMirrorDoc) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .runtime(tauri_runtime_wry::Wry::default())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                if let Ok(url) = window.url() {
+                    eprintln!(">>> TELAION WEBVIEW URL: {}", url);
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_workspace,
             read_tomet_document,

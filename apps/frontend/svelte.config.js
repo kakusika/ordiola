@@ -9,7 +9,7 @@ const config = {
       fallback: "index.html",
     }),
     paths: {
-      relative: false,
+      relative: true,
     },
   },
 };

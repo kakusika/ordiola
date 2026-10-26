@@ -5,5 +5,8 @@
   "keywords": [],
   "author": "",
   "license": "MIT OR Apache-2.0",
-  "packageManager": "pnpm@11.5.1"
+  "packageManager": "pnpm@11.5.1",
+  "devDependencies": {
+    "@tauri-apps/cli": "^3.0.0-alpha.5"
+  }
 }

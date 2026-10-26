@@ -14,6 +14,18 @@ build:
 release:
     cargo build --release
 
+# Build standalone Tauri release binary
+tauri-build:
+    pnpm tauri build --no-bundle
+
+# Run built release binary
+run:
+    ./target/release/telaion
+
+# Run built release binary (alias for run)
+tauri-run:
+    ./target/release/telaion
+
 # Run frontend development server
 frontend-dev:
     pnpm --filter @telaion/frontend dev
@@ -30,7 +42,7 @@ frontend-install:
 
 # Run Tauri application in development mode
 dev:
-    cargo tauri dev
+    pnpm tauri dev
 
 #[ Test & Lint ]
 
