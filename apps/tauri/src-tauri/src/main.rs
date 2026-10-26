@@ -40,5 +40,5 @@ fn main() {
         .find(|arg| !arg.starts_with('-'))
         .map(std::path::PathBuf::from);
 
-    telaion_lib::run(initial_vault)
+    telaion_lib::run_with_vault(initial_vault)
 }

@@ -16,7 +16,24 @@ let
       "rustfmt"
       "rust-analyzer"
     ])
+    fenix.targets.aarch64-linux-android.stable.rust-std
+    fenix.targets.armv7-linux-androideabi.stable.rust-std
+    fenix.targets.i686-linux-android.stable.rust-std
+    fenix.targets.x86_64-linux-android.stable.rust-std
   ];
+
+  androidSdk = pkgs.androidenv.composeAndroidPackages {
+    platformVersions = [
+      "34"
+      "36"
+    ];
+    buildToolsVersions = [
+      "34.0.0"
+      "36.0.0"
+    ];
+    includeNDK = true;
+  };
+  androidHome = "${androidSdk.androidsdk}/libexec/android-sdk";
 
   runtimeLibraries = with pkgs; [
     gtk3
@@ -58,12 +75,21 @@ mkShell rec {
       nodejs
       pnpm
 
+      #= Java / Android Tooling
+      jdk
+      androidSdk.androidsdk
+
       #= Tauri v2 Build Tools
       cargo-tauri
       pkg-config
       gobject-introspection
     ]
     ++ runtimeLibraries;
+
+  ANDROID_HOME = androidHome;
+  ANDROID_NDK_ROOT = "${androidHome}/ndk-bundle";
+  NDK_HOME = "${androidHome}/ndk-bundle";
+  JAVA_HOME = pkgs.jdk.home;
 
   PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:${pkgs.dbus.dev}/lib/pkgconfig:${pkgs.webkitgtk_6_0.dev}/lib/pkgconfig:${pkgs.gtk4.dev}/lib/pkgconfig";
   LD_LIBRARY_PATH = runtimeLibPath;

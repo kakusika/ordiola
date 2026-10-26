@@ -13,9 +13,15 @@ flake-parts.lib.mkFlake { inherit inputs; } {
   ];
 
   perSystem =
-    { pkgs, ... }:
+    { system, ... }:
     let
-      system = pkgs.stdenv.hostPlatform.system;
+      pkgs = import inputs.nixpkgs {
+        inherit system;
+        config = {
+          allowUnfree = true;
+          android_sdk.accept_license = true;
+        };
+      };
       sisho = inputs.sisho.packages.${system};
     in
     {

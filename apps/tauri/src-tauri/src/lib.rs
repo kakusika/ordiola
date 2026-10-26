@@ -138,7 +138,11 @@ fn resolve_document_path(path: &str, state: &State<'_, AppState>) -> Result<Path
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(initial_vault: Option<PathBuf>) {
+pub fn run() {
+    run_with_vault(None);
+}
+
+pub fn run_with_vault(initial_vault: Option<PathBuf>) {
     let mut config = AppConfig::load();
 
     // Determine initial active vault

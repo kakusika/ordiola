@@ -10,21 +10,65 @@ default:
 build:
     cargo build
 
-# Optimized build
+# Optimized build of Rust workspace
 release:
     cargo build --release
 
-# Build standalone Tauri release binary
-tauri-build:
+dist := "dist"
+package := "com.tomet.telaion"
+activity := package + "/.MainActivity"
+
+# Clean all aggregated build outputs in dist/
+clean-dist:
+    rm -rf {{dist}}
+    @echo "Cleaned {{dist}}/"
+
+#[ Desktop ]
+
+# Run desktop application in development mode
+desktop-dev:
+    pnpm tauri dev
+
+# Build desktop standalone release binary and copy into dist/
+desktop-release:
     pnpm tauri build --no-bundle
+    @mkdir -p {{dist}}
+    cp target/release/telaion {{dist}}/telaion
+    @echo "Built: {{dist}}/telaion"
 
-# Build and run standalone Tauri release binary (with optional vault path)
-tauri-run *ARGS: tauri-build
-    ./target/release/telaion {{ARGS}}
+# Build and run desktop release binary (with optional vault path)
+desktop-run *ARGS: desktop-release
+    ./{{dist}}/telaion {{ARGS}}
 
-# Run built release binary directly without rebuilding
-run *ARGS:
-    ./target/release/telaion {{ARGS}}
+#[ Android ]
+
+# Run Android application in development mode (device or emulator)
+android-dev *ARGS:
+    pnpm tauri android dev {{ARGS}}
+
+# Build Android APK (debug) and copy into dist/
+android-build *ARGS:
+    pnpm tauri android build --debug --apk {{ARGS}}
+    @mkdir -p {{dist}}
+    find apps/tauri/src-tauri/gen/android/app/build/outputs/apk -name "*debug*.apk" -exec cp {} {{dist}}/telaion-debug.apk \;
+    @echo "Built: {{dist}}/telaion-debug.apk"
+
+# Build Android APK (release) and copy into dist/
+android-release *ARGS:
+    pnpm tauri android build --apk {{ARGS}}
+    @mkdir -p {{dist}}
+    find apps/tauri/src-tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp {} {{dist}}/telaion.apk \;
+    @echo "Built: {{dist}}/telaion.apk"
+
+# Install the built debug APK on connected Android device/emulator
+android-install:
+    adb install -r {{dist}}/telaion-debug.apk
+
+# Install and launch on connected Android device/emulator
+android-launch: android-install
+    adb shell am start -n {{activity}}
+
+#[ Frontend ]
 
 # Run frontend development server
 frontend-dev:
@@ -38,11 +82,18 @@ frontend-build:
 frontend-install:
     pnpm install
 
-#[ Run ]
+#[ Aliases & Shortcuts ]
 
-# Run Tauri application in development mode
-dev:
-    pnpm tauri dev
+# Run desktop application in development mode (alias for desktop-dev)
+alias dev := desktop-dev
+
+# Run built desktop binary directly without rebuilding
+run *ARGS:
+    @if [ -f {{dist}}/telaion ]; then ./{{dist}}/telaion {{ARGS}}; else ./target/release/telaion {{ARGS}}; fi
+
+# Backward-compatible aliases
+alias tauri-build := desktop-release
+alias tauri-run := desktop-run
 
 #[ Test & Lint ]
 
