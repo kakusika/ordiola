@@ -1,0 +1,19 @@
+[package]
+name = "telaion-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tomet-ast = { workspace = true }
+tomet-parser = { workspace = true }
+tomet-printer = { workspace = true }
+tomet-workspace = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]

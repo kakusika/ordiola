@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "telaion",
+  "version": "0.1.0",
+  "identifier": "com.tomet.telaion",
+  "mainBinaryName": "telaion",
+  "build": {
+    "beforeDevCommand": "pnpm --filter @telaion/frontend dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm --filter @telaion/frontend build",
+    "frontendDist": "../../frontend/build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Telaion",
+        "width": 1200,
+        "height": 800,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Office",
+    "shortDescription": "Telaion - Workspace document editor for Tomet",
+    "longDescription": "Telaion is a rich workspace document editor for Tomet with hybrid block and WYSIWYG editing."
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "telaion",
+  "private": true,
+  "description": "Telaion - Workspace document editor for Tomet",
+  "keywords": [],
+  "author": "",
+  "license": "MIT OR Apache-2.0",
+  "packageManager": "pnpm@11.5.1"
+}
