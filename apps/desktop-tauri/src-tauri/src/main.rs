@@ -34,5 +34,11 @@ fn main() {
         }
     }
 
-    telaion_lib::run()
+    // Parse optional vault path from command line arguments
+    let initial_vault = std::env::args()
+        .skip(1)
+        .find(|arg| !arg.starts_with('-'))
+        .map(std::path::PathBuf::from);
+
+    telaion_lib::run(initial_vault)
 }

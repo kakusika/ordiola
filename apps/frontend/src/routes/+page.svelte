@@ -9,16 +9,34 @@
     is_dir: boolean;
   }
 
+  interface VaultEntry {
+    name: string;
+    path: string;
+    last_opened: number;
+  }
+
+  interface VaultState {
+    current_path: string;
+    current_name: string;
+    recent_vaults: VaultEntry[];
+  }
+
   // State (Svelte 5 runes)
   let editorElement = $state<HTMLDivElement | null>(null);
   let editor = $state<Editor | null>(null);
   let editMode = $state<"hybrid" | "full">("hybrid"); // "hybrid" = Block Hybrid, "full" = Full Block / WYSIWYG
-  let activeFile = $state<string>("tmtroot/readme.tmt");
+  let activeFile = $state<string>("readme.tmt");
   let activePath = $state<string>("tmtroot/readme.tmt");
   let isSaved = $state<boolean>(true);
   let isTauri = $state<boolean>(false);
-  let ipcStatus = $state<string>("待機中");
   let statusMessage = $state<string>("");
+
+  // Vault State
+  let vaultName = $state<string>("telaion");
+  let vaultPath = $state<string>(".");
+  let recentVaults = $state<VaultEntry[]>([]);
+  let isVaultMenuOpen = $state<boolean>(false);
+  let customVaultInput = $state<string>("");
 
   // Document metadata state
   let docMeta = $state<{ id: string; title: string; lang: string }>({
@@ -46,6 +64,7 @@
 
     <h2>==[ 主な特徴 ]==</h2>
     <ul>
+      <li><strong>Vault 管理</strong>: 左上のセレクターから複数の Vault を瞬時に切り替え可能。</li>
       <li><strong>ブロックハイブリッド</strong>: コールアウトや @meta などのブロック要素はリッチ UI で操作し、テキストは記号を直接書けるハイブリッド体験。</li>
       <li><strong>フルブロック</strong>: 装飾記号を隠し、完全なリッチテキストとして見たまま執筆。</li>
       <li><strong>Tomet AST 連携</strong>: Rust バックエンドで直接 Tomet 構文と相互変換。</li>
@@ -84,10 +103,9 @@
       },
     });
 
-    // Load workspace files and initial document via Tauri IPC
+    // Load initial vault and workspace files via Tauri IPC
     if (isTauri) {
-      await loadWorkspace();
-      await openDocument("tmtroot/readme.tmt");
+      await initVault();
     }
 
     // Register global keyboard shortcuts (Ctrl+S / Cmd+S)
@@ -108,18 +126,67 @@
     }
   }
 
+  async function initVault() {
+    if (!isTauri) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const vState = await invoke<VaultState>("get_vault_state");
+      if (vState) {
+        vaultName = vState.current_name;
+        vaultPath = vState.current_path;
+        recentVaults = vState.recent_vaults;
+      }
+      await loadWorkspace();
+    } catch (err: any) {
+      console.error("Vault init error:", err);
+      statusMessage = `Vault 初期化失敗: ${err?.message || err}`;
+    }
+  }
+
+  async function switchVault(targetPath: string) {
+    if (!isTauri || !targetPath.trim()) return;
+    isVaultMenuOpen = false;
+    statusMessage = `Vault 切り替え中: ${targetPath}...`;
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const res = await invoke<{ state: VaultState; files: FileEntry[] }>("switch_vault", {
+        path: targetPath,
+      });
+
+      vaultName = res.state.current_name;
+      vaultPath = res.state.current_path;
+      recentVaults = res.state.recent_vaults;
+      files = res.files.filter(f => f.path.endsWith(".tmt"));
+      customVaultInput = "";
+
+      statusMessage = `Vault 開封: ${vaultName} (${files.length} ファイル)`;
+
+      if (files.length > 0) {
+        await openDocument(files[0].path);
+      }
+    } catch (err: any) {
+      console.error("Switch vault error:", err);
+      statusMessage = `Vault 切り替えエラー: ${err?.message || err}`;
+    }
+  }
+
   async function loadWorkspace() {
     if (!isTauri) return;
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const result = await invoke<FileEntry[]>("open_workspace", { path: "." });
+      const result = await invoke<FileEntry[]>("open_workspace", { path: null });
       if (Array.isArray(result) && result.length > 0) {
         files = result.filter(f => f.path.endsWith(".tmt"));
-        ipcStatus = `${files.length} ファイル走査完了`;
+        // Automatically open readme or first file
+        const target = files.find(f => f.name.includes("readme")) || files[0];
+        if (target) {
+          await openDocument(target.path);
+        }
       }
     } catch (err: any) {
       console.error("Workspace load error:", err);
-      ipcStatus = `走査失敗: ${err?.message || err}`;
+      statusMessage = `ファイル走査失敗: ${err?.message || err}`;
     }
   }
 
@@ -179,14 +246,94 @@
 
 <div class="flex h-screen w-screen overflow-hidden bg-stone-950 text-stone-200 select-none">
   <!-- Left Sidebar: Workspace Vault -->
-  <aside class="w-64 border-r border-stone-800 bg-stone-900/60 flex flex-col shrink-0">
-    <!-- Header -->
-    <div class="p-3.5 border-b border-stone-800 flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50"></span>
-        <span class="font-bold text-sm tracking-wider text-stone-200">TELAION</span>
+  <aside class="w-68 border-r border-stone-800 bg-stone-900/60 flex flex-col shrink-0 relative">
+    <!-- Vault Header & Switcher Trigger -->
+    <div class="p-3 border-b border-stone-800 relative">
+      <div class="relative group/vault">
+        <button
+          class="w-full flex items-center justify-between p-2 rounded-lg bg-stone-800/60 hover:bg-stone-800 transition border border-stone-700/50 text-left"
+          onclick={() => isVaultMenuOpen = !isVaultMenuOpen}
+          title="Vault を切り替える"
+        >
+          <div class="flex items-baseline gap-2 min-w-0 flex-1 mr-2">
+            <span class="text-xs shrink-0">📂</span>
+            <span class="font-bold text-xs text-stone-200 shrink-0">{vaultName}</span>
+            <span class="text-[10px] text-stone-500 font-mono truncate flex-1">{vaultPath}</span>
+          </div>
+          <span class="text-stone-400 text-[10px] shrink-0">▼</span>
+        </button>
+
+        <!-- Hover detail tooltip showing full path with wrapping when menu is closed -->
+        {#if !isVaultMenuOpen}
+          <div
+            class="absolute left-0 right-0 top-full mt-1.5 hidden group-hover/vault:block z-40 bg-stone-900 border border-stone-700/80 p-2 rounded-lg shadow-2xl text-xs pointer-events-none backdrop-blur-md"
+          >
+            <div class="flex items-center gap-1.5 font-semibold text-stone-200 mb-1">
+              <span>📂</span>
+              <span>{vaultName}</span>
+            </div>
+            <div class="text-[10px] text-stone-400 font-mono break-all leading-relaxed bg-stone-950/80 p-1.5 rounded border border-stone-800">
+              {vaultPath}
+            </div>
+          </div>
+        {/if}
       </div>
-      <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-stone-800 text-stone-400 border border-stone-700/50">v0.1</span>
+
+      <!-- Vault Switcher Dropdown Popover -->
+      {#if isVaultMenuOpen}
+        <div
+          class="absolute top-full left-3 right-3 mt-1.5 bg-stone-900 border border-stone-700 rounded-lg shadow-2xl p-2 z-50 text-xs space-y-2 backdrop-blur-md"
+        >
+          <div class="px-2 py-1 text-[10px] font-semibold text-stone-400 uppercase tracking-wider flex items-center justify-between border-b border-stone-800 pb-1">
+            <span>Recent Vaults</span>
+            <button class="text-stone-400 hover:text-stone-200" onclick={() => isVaultMenuOpen = false}>✕</button>
+          </div>
+
+          <!-- Recent vaults list -->
+          <div class="max-h-48 overflow-y-auto space-y-1">
+            {#each recentVaults as vault}
+              <button
+                class="w-full text-left px-2 py-1.5 rounded transition group/vitem {vault.path === vaultPath ? 'bg-emerald-950/40 text-emerald-300 font-medium' : 'text-stone-300 hover:bg-stone-800'}"
+                onclick={() => switchVault(vault.path)}
+              >
+                <div class="flex items-center justify-between gap-1">
+                  <div class="flex items-baseline gap-2 min-w-0 flex-1">
+                    <span class="font-medium text-xs text-stone-200 shrink-0">{vault.name}</span>
+                    <span class="text-[10px] text-stone-500 font-mono truncate group-hover/vitem:hidden">{vault.path}</span>
+                  </div>
+                  {#if vault.path === vaultPath}
+                    <span class="text-xs text-emerald-400 shrink-0">✓</span>
+                  {/if}
+                </div>
+                <!-- Hover-expanded full path with wrapping -->
+                <div class="hidden group-hover/vitem:block text-[10px] text-stone-400 font-mono break-all leading-relaxed bg-stone-950/60 p-1.5 rounded border border-stone-800/80 mt-1">
+                  {vault.path}
+                </div>
+              </button>
+            {/each}
+          </div>
+
+          <!-- Open other directory input -->
+          <div class="pt-2 border-t border-stone-800 space-y-1.5">
+            <span class="text-[10px] text-stone-400 block px-1">別の Vault パスを開く:</span>
+            <div class="flex gap-1.5">
+              <input
+                type="text"
+                placeholder="/path/to/vault"
+                bind:value={customVaultInput}
+                class="flex-1 bg-stone-950 border border-stone-700 rounded px-2 py-1 text-stone-200 font-mono text-[11px] focus:outline-none focus:border-stone-500"
+                onkeydown={(e) => e.key === 'Enter' && switchVault(customVaultInput)}
+              />
+              <button
+                class="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded text-[11px] transition font-medium shrink-0"
+                onclick={() => switchVault(customVaultInput)}
+              >
+                開く
+              </button>
+            </div>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <!-- Workspace Tree -->
@@ -208,10 +355,10 @@
     </div>
 
     <!-- Bottom Status / Diagnostics -->
-    <div class="p-3 border-t border-stone-800/80 bg-stone-950/40 text-[11px] text-stone-400 space-y-2">
+    <div class="p-3 border-t border-stone-800/80 bg-stone-950/40 text-[11px] text-stone-400 space-y-1.5">
       <div class="flex items-center justify-between">
         <span>Backend:</span>
-        <span class="font-mono text-emerald-400">{isTauri ? "Tauri IPC" : "Web (Vite)"}</span>
+        <span class="font-mono text-emerald-400">{isTauri ? "Tauri v3 IPC" : "Web (Vite)"}</span>
       </div>
       {#if statusMessage}
         <div class="text-[10px] text-stone-400 truncate" title={statusMessage}>

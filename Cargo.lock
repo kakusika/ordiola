@@ -735,6 +735,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "directories"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16f5094c54661b38d03bd7e50df373292118db60b585c08a411c6d840017fe7d"
+dependencies = [
+ "dirs-sys",
+]
+
+[[package]]
 name = "dirs"
 version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3634,6 +3643,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "telaion-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "directories",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "telaion-core"
 version = "0.1.0"
 dependencies = [
@@ -3658,6 +3679,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-runtime-wry",
+ "telaion-config",
  "telaion-core",
 ]
 

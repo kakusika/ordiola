@@ -18,13 +18,13 @@ release:
 tauri-build:
     pnpm tauri build --no-bundle
 
-# Run built release binary
-run:
-    ./target/release/telaion
+# Build and run standalone Tauri release binary (with optional vault path)
+tauri-run *ARGS: tauri-build
+    ./target/release/telaion {{ARGS}}
 
-# Run built release binary (alias for run)
-tauri-run:
-    ./target/release/telaion
+# Run built release binary directly without rebuilding
+run *ARGS:
+    ./target/release/telaion {{ARGS}}
 
 # Run frontend development server
 frontend-dev:

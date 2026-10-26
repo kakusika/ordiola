@@ -18,6 +18,7 @@ tauri-build = { workspace = true }
 
 [dependencies]
 telaion-core = { workspace = true }
+telaion-config = { workspace = true }
 tauri = { workspace = true }
 tauri-runtime-wry = { workspace = true }
 tauri-plugin-opener = { workspace = true }
