@@ -11,20 +11,28 @@
     InlineAction,
     ContextMenuState,
     DeleteConfirmState,
+    EditorTab,
   } from "$lib/types";
 
   // State (Svelte 5 runes)
   let editorElement = $state<HTMLDivElement | null>(null);
   let editor = $state<Editor | null>(null);
-  let editMode = $state<"source" | "hybrid" | "full">("source"); // "source" = CodeMirror, "hybrid" = Block Hybrid, "full" = Full Block / WYSIWYG
-  let rawTextContent = $state<string>("");
-  let activeFile = $state<string>("readme.tmt");
-  let activePath = $state<string>("tmtroot/readme.tmt");
-  let isSaved = $state<boolean>(true);
   let isTauri = $state<boolean>(false);
   let statusMessage = $state<string>("");
 
-  let isTmtFile = $derived(activeFile.endsWith(".tmt"));
+  // Multi-Tab Management State
+  let tabs = $state<EditorTab[]>([]);
+  let activeTabId = $state<string>("");
+  let activeTab = $derived(tabs.find((t) => t.id === activeTabId) || null);
+  let closeConfirmTab = $state<EditorTab | null>(null);
+
+  // Derived properties from activeTab for seamless editor integration
+  let activeFile = $derived(activeTab ? activeTab.title : "");
+  let activePath = $derived(activeTab ? activeTab.path : "");
+  let isSaved = $derived(activeTab ? !activeTab.isModified : true);
+  let editMode = $derived<"source" | "hybrid" | "full">(activeTab ? activeTab.editMode : "source");
+  let rawTextContent = $derived(activeTab ? activeTab.rawContent : "");
+  let isTmtFile = $derived(activeTab ? activeTab.isTmt : false);
 
   // Vault State
   let vaultName = $state<string>("telaion");
@@ -167,7 +175,39 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
       return;
     }
 
+    if ((e.ctrlKey || e.metaKey) && e.key === "w") {
+      e.preventDefault();
+      if (activeTab) {
+        requestCloseTab(activeTab);
+      }
+      return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key === "PageDown") {
+      if (tabs.length > 1) {
+        e.preventDefault();
+        const cur = tabs.findIndex((t) => t.id === activeTabId);
+        const next = (cur + 1) % tabs.length;
+        switchTab(tabs[next].id);
+        return;
+      }
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key === "PageUp") {
+      if (tabs.length > 1) {
+        e.preventDefault();
+        const cur = tabs.findIndex((t) => t.id === activeTabId);
+        const prev = (cur - 1 + tabs.length) % tabs.length;
+        switchTab(tabs[prev].id);
+        return;
+      }
+    }
+
     if (e.key === "Escape") {
+      if (closeConfirmTab) {
+        closeConfirmTab = null;
+        return;
+      }
       if (deleteConfirmModal) {
         deleteConfirmModal = null;
         return;
@@ -623,85 +663,155 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
   }
 
   async function openDocument(filePath: string) {
-    activePath = filePath;
-    activeFile = filePath.split("/").pop() || filePath;
-    statusMessage = `読み込み中: ${activeFile}...`;
-
-    if (!isTauri) {
-      statusMessage = `モック表示: ${activeFile}`;
-      if (activeFile.endsWith(".tmt")) {
-        rawTextContent = defaultTometContent;
-      } else {
-        rawTextContent = `// Content of ${activeFile}\n`;
-      }
-      isSaved = true;
+    if (!filePath) return;
+    const existing = tabs.find((t) => t.path === filePath || t.id === filePath);
+    if (existing) {
+      await switchTab(existing.id);
       return;
     }
 
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const text = await invoke<string>("read_text_file", { path: filePath });
-      rawTextContent = text;
-      isSaved = true;
+    const title = filePath.split("/").pop() || filePath;
+    statusMessage = `読み込み中: ${title}...`;
 
-      // If opening non-Tomet file, force source mode
-      if (!filePath.endsWith(".tmt")) {
-        editMode = "source";
-        statusMessage = `ロード完了: ${activeFile}`;
+    let text = "";
+    let pmDoc: any = null;
+
+    if (!isTauri) {
+      statusMessage = `モック表示: ${title}`;
+      text = filePath.endsWith(".tmt") ? defaultTometContent : `// Content of ${title}\n`;
+    } else {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        text = await invoke<string>("read_text_file", { path: filePath });
+
+        if (filePath.endsWith(".tmt")) {
+          try {
+            pmDoc = await invoke<any>("parse_tomet_string", { source: text });
+          } catch (e: any) {
+            console.warn("Tomet parse warning:", e);
+          }
+        }
+      } catch (err: any) {
+        console.error("Failed to read file:", err);
+        statusMessage = `読み込みエラー: ${err?.message || err}`;
         return;
       }
+    }
 
-      // If opening .tmt file in hybrid/full mode, parse into Tiptap
-      if (editMode === "hybrid" || editMode === "full") {
-        try {
-          const pmDoc = await invoke<any>("parse_tomet_string", { source: text });
-          if (pmDoc && editor) {
-            editor.commands.setContent(pmDoc);
+    const newTab: EditorTab = {
+      id: filePath,
+      path: filePath,
+      title,
+      isModified: false,
+      isTmt: filePath.endsWith(".tmt"),
+      rawContent: text,
+      pmDoc,
+      editMode: "source",
+    };
+
+    tabs.push(newTab);
+    await switchTab(newTab.id);
+    statusMessage = `ロード完了: ${title}`;
+  }
+
+  async function switchTab(tabId: string) {
+    if (tabId === activeTabId) return;
+
+    if (activeTab && editor && activeTab.editMode !== "source") {
+      activeTab.pmDoc = editor.getJSON();
+    }
+
+    activeTabId = tabId;
+
+    if (activeTab && editor && activeTab.editMode !== "source") {
+      if (activeTab.pmDoc) {
+        editor.commands.setContent(activeTab.pmDoc);
+      } else if (activeTab.rawContent) {
+        if (isTauri) {
+          try {
+            const { invoke } = await import("@tauri-apps/api/core");
+            const parsed = await invoke<any>("parse_tomet_string", { source: activeTab.rawContent });
+            editor.commands.setContent(parsed);
+            activeTab.pmDoc = parsed;
+          } catch (e) {
+            console.warn("Tomet parse on switch warning:", e);
           }
-        } catch (e: any) {
-          console.warn("Tomet parse warning, falling back to source mode:", e);
-          editMode = "source";
-          statusMessage = `構文解析注意（ソース編集で表示）: ${e?.message || e}`;
-          return;
         }
       }
-
-      statusMessage = `ロード完了: ${activeFile}`;
-    } catch (err: any) {
-      console.error("Failed to read file:", err);
-      statusMessage = `読み込みエラー: ${err?.message || err}`;
     }
   }
 
+  function requestCloseTab(tabToClose: EditorTab) {
+    if (tabToClose.isModified) {
+      closeConfirmTab = tabToClose;
+      return;
+    }
+    executeCloseTab(tabToClose);
+  }
+
+  function executeCloseTab(tabToClose: EditorTab) {
+    const idx = tabs.findIndex((t) => t.id === tabToClose.id);
+    if (idx === -1) return;
+
+    tabs = tabs.filter((t) => t.id !== tabToClose.id);
+    if (activeTabId === tabToClose.id) {
+      if (tabs.length > 0) {
+        const nextIdx = Math.min(idx, tabs.length - 1);
+        switchTab(tabs[nextIdx].id);
+      } else {
+        activeTabId = "";
+      }
+    }
+    closeConfirmTab = null;
+  }
+
+  async function saveAndCloseTab(tab: EditorTab) {
+    if (tab.id === activeTabId) {
+      await saveCurrentDocument();
+    } else {
+      if (isTauri) {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          await invoke("write_text_file", { path: tab.path, content: tab.rawContent });
+        } catch (e: any) {
+          console.error("Save on close failed:", e);
+        }
+      }
+    }
+    executeCloseTab(tab);
+  }
+
   async function saveCurrentDocument() {
+    if (!activeTab) return;
     statusMessage = "保存中...";
 
     if (!isTauri) {
-      isSaved = true;
-      statusMessage = "保存完了（ブラウザモック）";
+      activeTab.isModified = false;
+      statusMessage = `保存完了（ブラウザモック）: ${activeTab.title}`;
       return;
     }
 
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      if (editMode === "source" || !isTmtFile) {
+      if (activeTab.editMode === "source" || !activeTab.isTmt) {
         await invoke("write_text_file", {
-          path: activePath,
-          content: rawTextContent,
+          path: activeTab.path,
+          content: activeTab.rawContent,
         });
       } else {
         const json = editor?.getJSON();
         if (json) {
           const tometStr = await invoke<string>("serialize_prosemirror_doc", { doc: json });
           await invoke("write_text_file", {
-            path: activePath,
+            path: activeTab.path,
             content: tometStr,
           });
-          rawTextContent = tometStr;
+          activeTab.rawContent = tometStr;
+          activeTab.pmDoc = json;
         }
       }
-      isSaved = true;
-      statusMessage = `保存完了: ${activePath}`;
+      activeTab.isModified = false;
+      statusMessage = `保存完了: ${activeTab.path}`;
     } catch (err: any) {
       console.error("Failed to save document:", err);
       statusMessage = `保存失敗: ${err?.message || err}`;
@@ -709,14 +819,16 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
   }
 
   function handleSourceChange(newContent: string) {
-    rawTextContent = newContent;
-    isSaved = false;
+    if (activeTab) {
+      activeTab.rawContent = newContent;
+      activeTab.isModified = true;
+    }
   }
 
   async function toggleMode(mode: "source" | "hybrid" | "full") {
-    if (mode === editMode) return;
+    if (!activeTab || mode === activeTab.editMode) return;
 
-    if (!isTmtFile && mode !== "source") {
+    if (!activeTab.isTmt && mode !== "source") {
       statusMessage = "Tomet ファイル (.tmt) 以外はソース編集モードのみ対応しています";
       return;
     }
@@ -725,9 +837,10 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
       if (isTauri && editor) {
         try {
           const { invoke } = await import("@tauri-apps/api/core");
-          const pmDoc = await invoke<any>("parse_tomet_string", { source: rawTextContent });
+          const pmDoc = await invoke<any>("parse_tomet_string", { source: activeTab.rawContent });
           if (pmDoc) {
             editor.commands.setContent(pmDoc);
+            activeTab.pmDoc = pmDoc;
           }
         } catch (err: any) {
           console.warn("Could not parse Tomet into ProseMirror:", err);
@@ -735,14 +848,15 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
           return;
         }
       }
-    } else if (mode === "source" && (editMode === "hybrid" || editMode === "full")) {
+    } else if (mode === "source" && (activeTab.editMode === "hybrid" || activeTab.editMode === "full")) {
       if (isTauri && editor) {
         try {
           const { invoke } = await import("@tauri-apps/api/core");
           const json = editor.getJSON();
           const tometStr = await invoke<string>("serialize_prosemirror_doc", { doc: json });
           if (tometStr) {
-            rawTextContent = tometStr;
+            activeTab.rawContent = tometStr;
+            activeTab.pmDoc = json;
           }
         } catch (err: any) {
           console.warn("Could not serialize ProseMirror into Tomet:", err);
@@ -750,7 +864,7 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
       }
     }
 
-    editMode = mode;
+    activeTab.editMode = mode;
   }
 </script>
 
@@ -970,68 +1084,108 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
 
   <!-- Main Workspace Canvas -->
   <main class="flex-1 flex flex-col h-full overflow-hidden bg-stone-900/20">
-    <!-- Top Bar: Navigation, Mode Switcher, Actions -->
-    <header class="h-13 border-b border-stone-800/80 px-6 flex items-center justify-between shrink-0 bg-stone-900/40 backdrop-blur-sm">
-      <!-- File info & Breadcrumb -->
-      <div class="flex items-center gap-3">
-        <span class="text-xs font-mono font-medium text-stone-300 bg-stone-800/60 px-2.5 py-1 rounded border border-stone-700/40 flex items-center gap-1.5">
-          <span>{isTmtFile ? "📜" : "📄"}</span>
-          <span>{activePath}</span>
-        </span>
-        <span class="text-[11px] px-2 py-0.5 rounded-full {isSaved ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/50' : 'bg-amber-950/60 text-amber-400 border border-amber-800/50'}">
-          {isSaved ? "Saved" : "Modified"}
-        </span>
+    <!-- Top Bar: Tab Strip, Mode Switcher, Actions -->
+    <header class="h-11 border-b border-stone-800/80 px-2 flex items-center justify-between shrink-0 bg-stone-900/60 backdrop-blur-sm select-none gap-2 min-w-0">
+      <!-- Tabs Strip Area -->
+      <div class="flex items-center gap-1 overflow-x-auto min-w-0 flex-1 scrollbar-none py-1">
+        {#each tabs as tab (tab.id)}
+          <div
+            class="group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono transition cursor-pointer shrink-0 border
+              {tab.id === activeTabId
+                ? 'bg-stone-800/90 text-stone-100 border-stone-700/80 shadow-sm'
+                : 'text-stone-400 hover:text-stone-200 hover:bg-stone-800/40 border-transparent'}"
+            role="tab"
+            tabindex="0"
+            onclick={() => switchTab(tab.id)}
+            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && switchTab(tab.id)}
+            onauxclick={(e) => { if (e.button === 1) requestCloseTab(tab); }}
+            title={tab.path}
+          >
+            <span class="text-xs shrink-0">{tab.isTmt ? "📜" : "📄"}</span>
+            <span class="truncate max-w-40 {tab.id === activeTabId ? 'font-medium' : ''}">{tab.title}</span>
+
+            {#if tab.isModified}
+              <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0 group-hover:hidden" title="変更あり"></span>
+            {/if}
+
+            <button
+              class="w-4 h-4 rounded hover:bg-stone-700 text-stone-400 hover:text-stone-200 flex items-center justify-center text-[10px] transition shrink-0 ml-0.5 cursor-pointer
+                {tab.isModified ? 'hidden group-hover:flex' : 'opacity-60 group-hover:opacity-100'}"
+              onclick={(e) => { e.stopPropagation(); requestCloseTab(tab); }}
+              title="タブを閉じる (Ctrl+W)"
+            >
+              ✕
+            </button>
+          </div>
+        {/each}
       </div>
 
-      <!-- Mode Switcher & Actions -->
-      <div class="flex items-center gap-3">
-        <!-- Mode Switcher -->
-        <div class="flex items-center bg-stone-950 p-0.5 rounded-lg border border-stone-800 text-xs">
-          <!-- Source Editor Button (Available for all text files) -->
+      <!-- Mode Switcher & Actions (Visible when a tab is open) -->
+      {#if activeTab}
+        <div class="flex items-center gap-2 shrink-0">
+          <!-- Mode Switcher -->
+          <div class="flex items-center bg-stone-950 p-0.5 rounded-lg border border-stone-800 text-xs">
+            <button
+              class="px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer {editMode === 'source' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
+              onclick={() => toggleMode('source')}
+              title="ソース編集: 生テキスト直接編集"
+            >
+              <span>📄</span>
+              <span class="text-[11px]">ソース</span>
+            </button>
+
+            {#if isTmtFile}
+              <button
+                class="px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer {editMode === 'hybrid' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
+                onclick={() => toggleMode('hybrid')}
+                title="ブロックハイブリッド編集"
+              >
+                <span>⚡</span>
+                <span class="text-[11px]">ハイブリッド</span>
+              </button>
+              <button
+                class="px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer {editMode === 'full' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
+                onclick={() => toggleMode('full')}
+                title="フルブロック (WYSIWYG) 編集"
+              >
+                <span>🎨</span>
+                <span class="text-[11px]">フルブロック</span>
+              </button>
+            {/if}
+          </div>
+
+          <!-- Save Button -->
           <button
-            class="px-3 py-1.5 rounded-md transition flex items-center gap-1.5 cursor-pointer {editMode === 'source' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
-            onclick={() => toggleMode('source')}
-            title="ソース編集: 生テキストを直接編集 (行番号・等幅・高信頼性)"
+            class="px-2.5 py-1 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700/60 transition flex items-center gap-1.5 cursor-pointer shrink-0"
+            onclick={saveCurrentDocument}
+            title="ドキュメントを保存 (Ctrl+S)"
           >
-            <span>📄</span>
-            <span>ソース編集</span>
+            <span>💾</span>
+            <span class="text-[11px]">保存</span>
           </button>
-
-          {#if isTmtFile}
-            <button
-              class="px-3 py-1.5 rounded-md transition flex items-center gap-1.5 cursor-pointer {editMode === 'hybrid' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
-              onclick={() => toggleMode('hybrid')}
-              title="ブロックハイブリッド: ブロック要素はリッチUI、見出しやテキストはマークアップ構文の直感的なハイブリッド編集"
-            >
-              <span>⚡</span>
-              <span>ハイブリッド</span>
-            </button>
-            <button
-              class="px-3 py-1.5 rounded-md transition flex items-center gap-1.5 cursor-pointer {editMode === 'full' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
-              onclick={() => toggleMode('full')}
-              title="フルブロック (WYSIWYG): 装飾記号を隠し、完全なリッチテキストとして見たまま編集"
-            >
-              <span>🎨</span>
-              <span>フルブロック</span>
-            </button>
-          {:else}
-            <span class="px-2 py-1 text-[10px] text-stone-500 font-mono select-none">
-              プレーンテキスト
-            </span>
-          {/if}
         </div>
+      {/if}
+    </header>
 
-        <!-- Save Button -->
+    {#if tabs.length === 0}
+      <!-- Empty Workspace State -->
+      <div class="flex-1 flex flex-col items-center justify-center text-center p-8 select-none text-stone-500">
+        <div class="w-16 h-16 rounded-2xl bg-stone-900/60 border border-stone-800 flex items-center justify-center text-3xl mb-4 shadow-xl">
+          📜
+        </div>
+        <h2 class="text-sm font-semibold text-stone-300 mb-1">開いているドキュメントがありません</h2>
+        <p class="text-xs text-stone-500 max-w-sm mb-6 leading-relaxed">
+          左側のエクスプローラーからファイルを選択して開くか、新しいファイルを作成してください。
+        </p>
         <button
-          class="px-3 py-1.5 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700/60 transition flex items-center gap-1.5 cursor-pointer"
-          onclick={saveCurrentDocument}
-          title="ドキュメントを保存 (Ctrl+S)"
+          class="px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700/60 transition flex items-center gap-1.5 cursor-pointer"
+          onclick={() => startCreateFile(selectedDir || "")}
         >
-          <span>💾</span>
-          <span>保存</span>
+          <span>📄</span>
+          <span>新しいファイルを作成</span>
         </button>
       </div>
-    </header>
+    {:else}
 
     <!-- CodeMirror 6 Source Text Editor (Active when editMode === 'source') -->
     <div class="flex-1 overflow-hidden relative" class:hidden={editMode !== 'source'}>
@@ -1099,6 +1253,7 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
         <div bind:this={editorElement} class="tiptap-editor cursor-text selection:bg-stone-800 select-text"></div>
       </div>
     </div>
+    {/if}
   </main>
 
   <!-- Context Menu Overlay -->
@@ -1268,6 +1423,53 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
             onclick={executeDelete}
           >
             削除
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  <!-- Unsaved Changes on Tab Close Modal -->
+  {#if closeConfirmTab}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+      onclick={() => (closeConfirmTab = null)}
+    >
+      <div
+        class="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl p-5 max-w-sm w-full text-xs space-y-3"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <div class="flex items-start gap-3">
+          <div class="p-2 rounded-lg bg-amber-950/60 border border-amber-800/60 text-amber-400 text-base shrink-0">
+            ⚠️
+          </div>
+          <div class="space-y-1 min-w-0">
+            <h3 class="text-sm font-semibold text-stone-100">変更が保存されていません</h3>
+            <p class="text-stone-300 break-all leading-relaxed">
+              「<span class="font-mono font-semibold text-stone-100">{closeConfirmTab.title}</span>」への変更を保存しますか？
+            </p>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-stone-800">
+          <button
+            class="px-3 py-1.5 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-stone-100 transition cursor-pointer font-medium"
+            onclick={() => (closeConfirmTab = null)}
+          >
+            キャンセル
+          </button>
+          <button
+            class="px-3 py-1.5 rounded-md bg-stone-800 hover:bg-stone-700 text-amber-300 hover:text-amber-200 transition cursor-pointer font-medium"
+            onclick={() => executeCloseTab(closeConfirmTab!)}
+          >
+            保存しない
+          </button>
+          <button
+            class="px-3 py-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white font-medium transition cursor-pointer shadow-sm"
+            onclick={() => saveAndCloseTab(closeConfirmTab!)}
+          >
+            保存する
           </button>
         </div>
       </div>

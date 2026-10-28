@@ -40,3 +40,15 @@ export interface DeleteConfirmState {
   entry: FileEntry;
 }
 
+export interface EditorTab {
+  id: string;
+  path: string;
+  title: string;
+  isModified: boolean;
+  isTmt: boolean;
+  rawContent: string;
+  pmDoc?: any;
+  editMode: "source" | "hybrid" | "full";
+}
+
+
