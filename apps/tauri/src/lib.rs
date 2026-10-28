@@ -227,6 +227,17 @@ fn delete_entry(path: &str, state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn move_entry(
+    source_path: &str,
+    dest_dir: &str,
+    state: State<'_, AppState>,
+) -> Result<FileEntry, String> {
+    let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
+    telaion_core::move_entry(&vault_root, Path::new(source_path), Path::new(dest_dir))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn write_tomet_document(
     path: &str,
     doc: ProseMirrorDoc,
@@ -340,6 +351,7 @@ pub fn run_with_vault(initial_vault: Option<PathBuf>) {
             extract_metadata,
             inject_metadata,
             extract_config,
+            move_entry,
             parse_tomet_string,
             serialize_prosemirror_doc,
             read_tomet_document,

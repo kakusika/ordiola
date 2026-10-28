@@ -784,6 +784,52 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
     }
   }
 
+  async function handleMoveEntry(sourceRel: string, destDirRel: string) {
+    if (!sourceRel) return;
+    const srcParent = sourceRel.includes("/") ? sourceRel.substring(0, sourceRel.lastIndexOf("/")) : "";
+    const cleanDest = destDirRel === "." ? "" : destDirRel;
+    if (srcParent === cleanDest) {
+      return;
+    }
+
+    if (!isTauri) {
+      statusMessage = `移動完了（モック）: ${sourceRel} -> ${destDirRel}`;
+      return;
+    }
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const movedEntry = await invoke<FileEntry>("move_entry", {
+        sourcePath: sourceRel,
+        destDir: destDirRel || ".",
+      });
+
+      // Update open tabs if the moved entry or its descendants are open
+      for (const tab of tabs) {
+        if (tab.path === sourceRel) {
+          tab.path = movedEntry.relative_path;
+          tab.title = movedEntry.name;
+        } else if (tab.path.startsWith(sourceRel + "/")) {
+          tab.path = movedEntry.relative_path + tab.path.substring(sourceRel.length);
+        }
+      }
+
+      // Update activePath if opened file was moved
+      if (activePath === sourceRel) {
+        activePath = movedEntry.relative_path;
+        activeFile = movedEntry.name;
+      } else if (activePath.startsWith(sourceRel + "/")) {
+        activePath = movedEntry.relative_path + activePath.substring(sourceRel.length);
+      }
+
+      await refreshWorkspace();
+      statusMessage = `移動完了: ${sourceRel} -> ${movedEntry.relative_path}`;
+    } catch (err: any) {
+      console.error("Move error:", err);
+      statusMessage = `移動失敗: ${err?.message || err}`;
+    }
+  }
+
   async function handleRootNewKeyDown(e: KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -1302,6 +1348,14 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
       onclick={() => (selectedEntry = null)}
       onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') selectedEntry = null; }}
       oncontextmenu={handleBackgroundContextMenu}
+      ondragover={(e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; }}
+      ondrop={(e) => {
+        e.preventDefault();
+        const src = e.dataTransfer?.getData("text/plain");
+        if (src) {
+          handleMoveEntry(src, ".");
+        }
+      }}
     >
       <!-- Root-level inline create row -->
       {#if isRootCreating}
@@ -1346,6 +1400,7 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
             onContextMenu={handleContextMenu}
             onCommitInlineAction={commitInlineAction}
             onCancelInlineAction={cancelInlineAction}
+            onMoveEntry={handleMoveEntry}
           />
         {/each}
       {/if}
