@@ -10,8 +10,9 @@ node_modules/
 .svelte-kit/
 .wireit/
 
-#== Tauri schema
-**/gen/schemas/
+#== git worktrees
+.worktrees/
+
 
 #== Test output
 tests/store/
