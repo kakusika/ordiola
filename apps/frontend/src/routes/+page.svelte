@@ -71,6 +71,32 @@
   let contextMenu = $state<ContextMenuState | null>(null);
   let deleteConfirmModal = $state<DeleteConfirmState | null>(null);
 
+  // Quick Open state
+  let isQuickOpenOpen = $state<boolean>(false);
+  let quickOpenQuery = $state<string>("");
+  let allWorkspaceFiles = $state<FileEntry[]>([]);
+  let quickOpenSelectedIndex = $state<number>(0);
+  let quickOpenInputEl = $state<HTMLInputElement | null>(null);
+
+  let filteredQuickOpenFiles = $derived.by(() => {
+    const q = quickOpenQuery.trim().toLowerCase();
+    if (!q) {
+      return allWorkspaceFiles.slice(0, 30);
+    }
+    return allWorkspaceFiles
+      .filter((f) => {
+        const pathLower = f.relative_path.toLowerCase();
+        const nameLower = f.name.toLowerCase();
+        if (nameLower.includes(q) || pathLower.includes(q)) return true;
+        let qi = 0;
+        for (let i = 0; i < pathLower.length && qi < q.length; i++) {
+          if (pathLower[i] === q[qi]) qi++;
+        }
+        return qi === q.length;
+      })
+      .slice(0, 30);
+  });
+
   // Document metadata & configuration state
   interface TometDocMeta {
     id: string;
@@ -194,6 +220,12 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
   });
 
   function handleKeydown(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+      e.preventDefault();
+      toggleQuickOpen();
+      return;
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
       saveCurrentDocument();
@@ -229,6 +261,10 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
     }
 
     if (e.key === "Escape") {
+      if (isQuickOpenOpen) {
+        closeQuickOpen();
+        return;
+      }
       if (closeConfirmTab) {
         closeConfirmTab = null;
         return;
@@ -262,6 +298,70 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
         e.preventDefault();
         confirmDelete(selectedEntry);
       }
+    }
+  }
+
+  async function openQuickOpen() {
+    isQuickOpenOpen = true;
+    quickOpenQuery = "";
+    quickOpenSelectedIndex = 0;
+    if (isTauri) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const files = await invoke<FileEntry[]>("list_all_files");
+        allWorkspaceFiles = files || [];
+      } catch (e) {
+        console.error("Failed to list all files for quick open:", e);
+      }
+    } else {
+      allWorkspaceFiles = [
+        { name: "readme.tmt", path: "tmtroot/readme.tmt", relative_path: "tmtroot/readme.tmt", is_dir: false, has_children: false, extension: "tmt" },
+        { name: "agents.tmt", path: "tmtroot/agents.tmt", relative_path: "tmtroot/agents.tmt", is_dir: false, has_children: false, extension: "tmt" },
+        { name: "contributing.tmt", path: "tmtroot/contributing.tmt", relative_path: "tmtroot/contributing.tmt", is_dir: false, has_children: false, extension: "tmt" },
+        { name: "Cargo.toml", path: "Cargo.toml", relative_path: "Cargo.toml", is_dir: false, has_children: false, extension: "toml" },
+        { name: "default.config.tmt", path: "default.config.tmt", relative_path: "default.config.tmt", is_dir: false, has_children: false, extension: "tmt" },
+      ];
+    }
+    setTimeout(() => {
+      quickOpenInputEl?.focus();
+    }, 50);
+  }
+
+  function closeQuickOpen() {
+    isQuickOpenOpen = false;
+    quickOpenQuery = "";
+    quickOpenSelectedIndex = 0;
+  }
+
+  function toggleQuickOpen() {
+    if (isQuickOpenOpen) {
+      closeQuickOpen();
+    } else {
+      openQuickOpen();
+    }
+  }
+
+  function handleQuickOpenKeydown(e: KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (filteredQuickOpenFiles.length > 0) {
+        quickOpenSelectedIndex = (quickOpenSelectedIndex + 1) % filteredQuickOpenFiles.length;
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (filteredQuickOpenFiles.length > 0) {
+        quickOpenSelectedIndex = (quickOpenSelectedIndex - 1 + filteredQuickOpenFiles.length) % filteredQuickOpenFiles.length;
+      }
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const target = filteredQuickOpenFiles[quickOpenSelectedIndex];
+      if (target) {
+        closeQuickOpen();
+        openDocument(target.relative_path || target.path);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeQuickOpen();
     }
   }
 
@@ -1303,6 +1403,17 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
         {/each}
       </div>
 
+      <!-- Quick Open button -->
+      <button
+        class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-stone-800/60 hover:bg-stone-800 text-stone-300 hover:text-stone-100 border border-stone-700/50 text-xs transition cursor-pointer shrink-0"
+        onclick={openQuickOpen}
+        title="ファイルを検索 / クイックオープン (Ctrl+P)"
+      >
+        <span class="text-xs">🔍</span>
+        <span class="text-[11px] hidden sm:inline text-stone-300">ファイル検索</span>
+        <kbd class="px-1.5 py-0.2 rounded bg-stone-900 border border-stone-700/60 text-[9px] font-mono text-stone-400">Ctrl+P</kbd>
+      </button>
+
       <!-- Mode Switcher & Actions (Visible when a tab is open) -->
       {#if activeTab}
         <div class="flex items-center gap-2 shrink-0">
@@ -1810,6 +1921,84 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
           >
             保存する
           </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Quick Open / Fuzzy Finder Modal -->
+  {#if isQuickOpenOpen}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start justify-center pt-20 px-4"
+      onclick={closeQuickOpen}
+    >
+      <div
+        class="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-xl w-full overflow-hidden flex flex-col text-xs space-y-0"
+        onclick={(e) => e.stopPropagation()}
+      >
+        <!-- Search Input Bar -->
+        <div class="flex items-center gap-2 px-3.5 py-3 border-b border-stone-800 bg-stone-950/50">
+          <span class="text-stone-400 text-sm">🔍</span>
+          <input
+            bind:this={quickOpenInputEl}
+            type="text"
+            bind:value={quickOpenQuery}
+            placeholder="ファイルを検索... (矢印キーで選択, Enterで決定)"
+            class="flex-1 bg-transparent text-stone-100 placeholder-stone-500 text-sm focus:outline-none font-mono"
+            onkeydown={handleQuickOpenKeydown}
+          />
+          <kbd class="px-1.5 py-0.5 rounded bg-stone-800 border border-stone-700 text-[10px] font-mono text-stone-400">ESC</kbd>
+        </div>
+
+        <!-- Search Results List -->
+        <div class="max-h-96 overflow-y-auto p-1.5 space-y-0.5">
+          {#if filteredQuickOpenFiles.length === 0}
+            <div class="p-6 text-center text-stone-500 italic text-xs font-mono">
+              一致するファイルが見つかりません
+            </div>
+          {:else}
+            {#each filteredQuickOpenFiles as file, index (file.relative_path || file.path)}
+              <div
+                class="flex items-center justify-between px-3 py-2 rounded-lg transition cursor-pointer {index === quickOpenSelectedIndex ? 'bg-sky-500/20 text-sky-100 border border-sky-500/40' : 'text-stone-300 hover:bg-stone-800/80 border border-transparent'}"
+                onclick={() => {
+                  closeQuickOpen();
+                  openDocument(file.relative_path || file.path);
+                }}
+                onmouseenter={() => (quickOpenSelectedIndex = index)}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => { if (e.key === 'Enter') { closeQuickOpen(); openDocument(file.relative_path || file.path); } }}
+              >
+                <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                  <span class="text-sm shrink-0">
+                    {file.name.endsWith('.tmt') ? '📜' : file.name.endsWith('.toml') ? '⚙️' : '📄'}
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="font-medium text-xs truncate">
+                      {file.name}
+                    </div>
+                    <div class="text-[10px] font-mono text-stone-400 truncate">
+                      {file.relative_path}
+                    </div>
+                  </div>
+                </div>
+
+                {#if index === quickOpenSelectedIndex}
+                  <span class="text-[10px] text-sky-400 shrink-0 font-mono">
+                    Enter で開く ↵
+                  </span>
+                {/if}
+              </div>
+            {/each}
+          {/if}
+        </div>
+
+        <!-- Footer status -->
+        <div class="px-3.5 py-1.5 bg-stone-950 border-t border-stone-800/80 flex items-center justify-between text-[10px] text-stone-500 font-mono">
+          <span>{filteredQuickOpenFiles.length} 件のファイル</span>
+          <span>↑↓ 移動 ・ ↵ 選択 ・ ESC 閉じる</span>
         </div>
       </div>
     </div>

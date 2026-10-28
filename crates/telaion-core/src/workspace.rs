@@ -126,6 +126,56 @@ fn scan_workspace_recursive(
     Ok(entries)
 }
 
+/// Flattened list of all non-ignored files in the workspace for fast fuzzy searching / quick open
+pub fn list_all_files(vault_root: &Path) -> std::io::Result<Vec<FileEntry>> {
+    let mut files = Vec::new();
+    let walker = WalkBuilder::new(vault_root)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .require_git(false)
+        .build();
+
+    for result in walker {
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let path = entry.path();
+        if path == vault_root {
+            continue;
+        }
+
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        if is_dir {
+            continue;
+        }
+
+        let name = entry.file_name().to_string_lossy().to_string();
+        let relative_path = path
+            .strip_prefix(vault_root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .to_string();
+        let extension = path.extension().map(|e| e.to_string_lossy().to_string());
+
+        files.push(FileEntry {
+            name,
+            path: path.to_path_buf(),
+            relative_path,
+            is_dir: false,
+            extension,
+            has_children: false,
+            children: None,
+        });
+    }
+
+    files.sort_by(|a, b| a.relative_path.to_lowercase().cmp(&b.relative_path.to_lowercase()));
+    Ok(files)
+}
+
 /// Safely resolve a path within `vault_root`.
 /// Returns an error if the path attempts to escape `vault_root`.
 pub fn resolve_in_vault(vault_root: &Path, target: &Path) -> std::io::Result<PathBuf> {
@@ -460,6 +510,31 @@ mod tests {
         assert!(resolve_in_vault(&temp_dir, Path::new("../outside.txt")).is_err());
         assert!(create_file(&temp_dir, Path::new("../escaped.txt"), None).is_err());
         assert!(delete_entry(&temp_dir, Path::new("")).is_err()); // Cannot delete vault root
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_list_all_files() {
+        let temp_dir = std::env::temp_dir().join("telaion_test_quick_open");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        fs::write(temp_dir.join(".gitignore"), "*.log\nignored/\n").unwrap();
+        fs::write(temp_dir.join("root.tmt"), "root").unwrap();
+        fs::create_dir_all(temp_dir.join("docs")).unwrap();
+        fs::write(temp_dir.join("docs").join("guide.tmt"), "guide").unwrap();
+        fs::create_dir_all(temp_dir.join("ignored")).unwrap();
+        fs::write(temp_dir.join("ignored").join("skip.tmt"), "skip").unwrap();
+        fs::write(temp_dir.join("test.log"), "log").unwrap();
+
+        let files = list_all_files(&temp_dir).unwrap();
+        let rel_paths: Vec<String> = files.into_iter().map(|f| f.relative_path).collect();
+
+        assert!(rel_paths.contains(&"root.tmt".to_string()));
+        assert!(rel_paths.contains(&"docs/guide.tmt".to_string()));
+        assert!(!rel_paths.contains(&"ignored/skip.tmt".to_string()));
+        assert!(!rel_paths.contains(&"test.log".to_string()));
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

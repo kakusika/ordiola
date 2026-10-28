@@ -127,6 +127,15 @@ fn list_directory(
 }
 
 #[tauri::command]
+fn list_all_files(state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
+    let vault_root = {
+        let current = state.current_vault.lock().map_err(|e| e.to_string())?;
+        current.clone()
+    };
+    telaion_core::list_all_files(&vault_root).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn open_workspace(
     path: Option<&str>,
     state: State<'_, AppState>,
@@ -320,6 +329,7 @@ pub fn run_with_vault(initial_vault: Option<PathBuf>) {
             switch_vault,
             pick_vault_directory,
             list_directory,
+            list_all_files,
             open_workspace,
             read_text_file,
             write_text_file,
