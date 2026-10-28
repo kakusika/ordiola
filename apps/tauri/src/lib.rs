@@ -96,6 +96,17 @@ fn switch_vault(
     })
 }
 
+/// Open native folder picker dialog and return selected path
+#[tauri::command]
+async fn pick_vault_directory() -> Result<Option<String>, String> {
+    let folder = rfd::AsyncFileDialog::new()
+        .set_title("Vault フォルダを選択")
+        .pick_folder()
+        .await;
+
+    Ok(folder.map(|p| p.path().to_string_lossy().to_string()))
+}
+
 /// List directory entries on demand (lazy loading)
 #[tauri::command]
 fn list_directory(
@@ -292,6 +303,7 @@ pub fn run_with_vault(initial_vault: Option<PathBuf>) {
         .invoke_handler(tauri::generate_handler![
             get_vault_state,
             switch_vault,
+            pick_vault_directory,
             list_directory,
             open_workspace,
             read_text_file,

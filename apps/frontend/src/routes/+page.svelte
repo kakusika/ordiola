@@ -260,6 +260,24 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
     }
   }
 
+  async function openFolderDialog() {
+    isVaultMenuOpen = false;
+    if (!isTauri) {
+      statusMessage = "ブラウザ環境ではネイティブフォルダ選択は利用できません";
+      return;
+    }
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const selected = await invoke<string | null>("pick_vault_directory");
+      if (selected) {
+        await switchVault(selected);
+      }
+    } catch (err: any) {
+      console.error("Folder picker error:", err);
+      statusMessage = `フォルダ選択失敗: ${err?.message || err}`;
+    }
+  }
+
   async function loadWorkspace() {
     if (!isTauri) return;
     try {
@@ -759,9 +777,9 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
   <aside class="w-68 border-r border-stone-800 bg-stone-900/60 flex flex-col shrink-0 relative">
     <!-- Vault Header & Switcher Trigger -->
     <div class="p-3 border-b border-stone-800 relative">
-      <div class="relative group/vault">
+      <div class="flex items-center gap-1.5 relative group/vault">
         <button
-          class="w-full flex items-center justify-between p-2 rounded-lg bg-stone-800/60 hover:bg-stone-800 transition border border-stone-700/50 text-left cursor-pointer"
+          class="flex-1 flex items-center justify-between p-2 rounded-lg bg-stone-800/60 hover:bg-stone-800 transition border border-stone-700/50 text-left cursor-pointer min-w-0"
           onclick={() => (isVaultMenuOpen = !isVaultMenuOpen)}
           title="Vault を切り替える"
         >
@@ -771,6 +789,19 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
             <span class="text-[10px] text-stone-500 font-mono truncate flex-1">{vaultPath}</span>
           </div>
           <span class="text-stone-400 text-[10px] shrink-0">▼</span>
+        </button>
+
+        <!-- Quick Native Folder Picker Trigger -->
+        <button
+          class="p-2 rounded-lg bg-stone-800/60 hover:bg-stone-800 hover:text-sky-300 transition border border-stone-700/50 text-stone-400 text-xs cursor-pointer shrink-0"
+          onclick={openFolderDialog}
+          title="ネイティブフォルダ選択でVaultを開く"
+        >
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            <line x1="12" y1="11" x2="12" y2="17"/>
+            <line x1="9" y1="14" x2="15" y2="14"/>
+          </svg>
         </button>
 
         <!-- Hover detail tooltip showing full path with wrapping when menu is closed -->
@@ -823,9 +854,20 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
             {/each}
           </div>
 
+          <!-- Native Directory Dialog Button -->
+          <div class="pt-2 border-t border-stone-800">
+            <button
+              class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 hover:text-sky-100 border border-sky-500/30 hover:border-sky-500/60 transition font-medium text-xs cursor-pointer shadow-sm"
+              onclick={openFolderDialog}
+            >
+              <span>📂</span>
+              <span>フォルダを選択して開く...</span>
+            </button>
+          </div>
+
           <!-- Open other directory input -->
           <div class="pt-2 border-t border-stone-800 space-y-1.5">
-            <span class="text-[10px] text-stone-400 block px-1">別の Vault パスを開く:</span>
+            <span class="text-[10px] text-stone-400 block px-1">直接パスを入力:</span>
             <div class="flex gap-1.5">
               <input
                 type="text"
