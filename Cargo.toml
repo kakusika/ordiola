@@ -1,11 +1,6 @@
 [workspace]
 resolver = "3"
-members = [
-  "apps/tauri",
-  "crates/telaion-config",
-  "crates/telaion-core",
-]
-
+members = ["apps/tauri", "crates/telaion-config", "crates/telaion-core"]
 default-members = ["apps/tauri"]
 
 [workspace.package]
@@ -17,7 +12,6 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 telaion-config = { path = "crates/telaion-config" }
 telaion-core = { path = "crates/telaion-core" }
-directories = "6"
 
 #= Tomet
 tomet-ast = { git = "https://github.com/tomet-lang/tomet.git" }
@@ -31,24 +25,22 @@ tauri-build = { version = "3.0.0-alpha.4", features = [] }
 tauri-plugin-opener = "3.0.0-alpha.3"
 tauri-runtime-wry = "3.0.0-alpha.5"
 
-#= Serialization & Async
+#= Crates.io
+anyhow = "1"
+directories = "6"
+ignore = "0.4"
+notify = "8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 
-#= Filesystem & Watcher
-ignore = "0.4"
-notify = "8"
-
 [profile.release]
 opt-level = "z"
-lto = "fat"
+lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true
 
 [profile.dev.package."*"]
 opt-level = 3
-

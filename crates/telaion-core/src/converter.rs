@@ -403,13 +403,10 @@ pub fn prosemirror_to_tomet(doc: &ProseMirrorDoc) -> anyhow::Result<String> {
                 for item_node in &node.content {
                     let mut item_blocks = Vec::new();
                     for child in &item_node.content {
-                        match child.node_type.as_str() {
-                            "paragraph" => {
-                                let inlines = pm_nodes_to_inlines(&child.content);
-                                item_blocks
-                                    .push(Block::Paragraph(Paragraph::new(inlines, Span::dummy())));
-                            }
-                            _ => {}
+                        if child.node_type.as_str() == "paragraph" {
+                            let inlines = pm_nodes_to_inlines(&child.content);
+                            item_blocks
+                                .push(Block::Paragraph(Paragraph::new(inlines, Span::dummy())));
                         }
                     }
                     let item_element = Element {
@@ -555,5 +552,12 @@ mod tests {
         let output = prosemirror_to_tomet(&pm_doc).expect("serialization succeeded");
         assert!(output.contains("Welcome"));
         assert!(output.contains("Simple text paragraph."));
+    }
+
+    #[test]
+    fn test_parse_real_readme_tmt() {
+        let content = std::fs::read_to_string("../../tmtroot/readme.tmt").unwrap();
+        let res = tomet_to_prosemirror(&content);
+        assert!(res.is_ok());
     }
 }
