@@ -14,6 +14,7 @@
     onContextMenu: (e: MouseEvent, entry: FileEntry) => void;
     onCommitInlineAction: (value: string) => Promise<void>;
     onCancelInlineAction: () => void;
+    onMoveEntry: (sourceRel: string, destDirRel: string) => Promise<void>;
   }
 
   let {
@@ -28,7 +29,10 @@
     onContextMenu,
     onCommitInlineAction,
     onCancelInlineAction,
+    onMoveEntry,
   }: Props = $props();
+
+  let isDragOver = $state(false);
 
   let isRenaming = $derived(
     inlineAction?.type === "rename" &&
@@ -139,6 +143,46 @@
       }
     }, 150);
   }
+
+  function handleDragStart(e: DragEvent) {
+    if (isRenaming) return;
+    const path = entry.relative_path || entry.path;
+    e.dataTransfer?.setData("text/plain", path);
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+    }
+  }
+
+  function handleDragOver(e: DragEvent) {
+    if (!entry.is_dir) return;
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "move";
+    }
+  }
+
+  function handleDragEnter(e: DragEvent) {
+    if (!entry.is_dir) return;
+    e.preventDefault();
+    isDragOver = true;
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    if (!entry.is_dir) return;
+    isDragOver = false;
+  }
+
+  async function handleDrop(e: DragEvent) {
+    if (!entry.is_dir) return;
+    e.preventDefault();
+    e.stopPropagation();
+    isDragOver = false;
+    const sourcePath = e.dataTransfer?.getData("text/plain");
+    const targetDir = entry.relative_path || entry.path;
+    if (sourcePath && sourcePath !== targetDir) {
+      await onMoveEntry(sourcePath, targetDir);
+    }
+  }
 </script>
 
 <div class="select-none text-xs">
@@ -173,12 +217,20 @@
   {:else}
     <button
       class="w-full flex items-center gap-1.5 py-1 px-1.5 rounded transition text-left group cursor-pointer
-        {activePath === entry.path || activePath === entry.relative_path
-          ? 'bg-stone-800 text-sky-300 font-medium shadow-sm'
-          : selectedPath === entry.path || selectedPath === entry.relative_path
-            ? 'bg-stone-800/70 text-stone-100 ring-1 ring-stone-700/80'
-            : 'text-stone-300 hover:bg-stone-800/40 hover:text-stone-100'}"
+        {isDragOver
+          ? 'bg-sky-500/30 ring-2 ring-sky-400 text-sky-100 shadow-md'
+          : activePath === entry.path || activePath === entry.relative_path
+            ? 'bg-stone-800 text-sky-300 font-medium shadow-sm'
+            : selectedPath === entry.path || selectedPath === entry.relative_path
+              ? 'bg-stone-800/70 text-stone-100 ring-1 ring-stone-700/80'
+              : 'text-stone-300 hover:bg-stone-800/40 hover:text-stone-100'}"
       style="padding-left: {depth * 14 + 6}px;"
+      draggable={!isRenaming}
+      ondragstart={handleDragStart}
+      ondragover={handleDragOver}
+      ondragenter={handleDragEnter}
+      ondragleave={handleDragLeave}
+      ondrop={handleDrop}
       onclick={handleClick}
       oncontextmenu={handleContextMenu}
     >
@@ -250,6 +302,7 @@
             {onContextMenu}
             {onCommitInlineAction}
             {onCancelInlineAction}
+            {onMoveEntry}
           />
         {/each}
         {#if entry.children.length === 0 && !isCreatingChildHere}

@@ -334,6 +334,77 @@ pub fn rename_entry(
     entry_from_path(vault_root, &new_full)
 }
 
+/// Move a file or directory `source_relative` into directory `dest_dir_relative` within `vault_root`.
+pub fn move_entry(
+    vault_root: &Path,
+    source_relative: &Path,
+    dest_dir_relative: &Path,
+) -> std::io::Result<FileEntry> {
+    let source_full = resolve_in_vault(vault_root, source_relative)?;
+    if !source_full.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("移動元が見つかりません: {}", source_full.display()),
+        ));
+    }
+
+    let canonical_root = vault_root
+        .canonicalize()
+        .unwrap_or_else(|_| vault_root.to_path_buf());
+
+    if source_full == canonical_root {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Vaultルート自体を移動することはできません",
+        ));
+    }
+
+    let dest_dir_full = resolve_in_vault(vault_root, dest_dir_relative)?;
+    if !dest_dir_full.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotADirectory,
+            format!("移動先がディレクトリではありません: {}", dest_dir_full.display()),
+        ));
+    }
+
+    // Security & sanity check: Cannot move directory into itself or into its own descendant
+    if source_full.is_dir() && (dest_dir_full == source_full || dest_dir_full.starts_with(&source_full)) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "ディレクトリを自身またはその配下のディレクトリに移動することはできません",
+        ));
+    }
+
+    let file_name = match source_full.file_name() {
+        Some(name) => name,
+        None => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "無効な移動元ファイル名です",
+            ));
+        }
+    };
+
+    let target_destination = dest_dir_full.join(file_name);
+
+    if target_destination == source_full {
+        return entry_from_path(vault_root, &source_full);
+    }
+
+    if target_destination.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!(
+                "移動先に同名のファイルまたはフォルダが既に存在します: {}",
+                target_destination.display()
+            ),
+        ));
+    }
+
+    std::fs::rename(&source_full, &target_destination)?;
+    entry_from_path(vault_root, &target_destination)
+}
+
 /// Delete a file or directory within `vault_root`.
 pub fn delete_entry(vault_root: &Path, target_relative: &Path) -> std::io::Result<()> {
     let target_full = resolve_in_vault(vault_root, target_relative)?;
@@ -460,6 +531,48 @@ mod tests {
         assert!(resolve_in_vault(&temp_dir, Path::new("../outside.txt")).is_err());
         assert!(create_file(&temp_dir, Path::new("../escaped.txt"), None).is_err());
         assert!(delete_entry(&temp_dir, Path::new("")).is_err()); // Cannot delete vault root
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_move_entry() {
+        let temp_dir = std::env::temp_dir().join("telaion_test_move");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        // Setup folders and files
+        let _ = create_file(&temp_dir, Path::new("file.tmt"), Some("hello")).unwrap();
+        let _ = create_directory(&temp_dir, Path::new("sub1")).unwrap();
+        let _ = create_directory(&temp_dir, Path::new("sub2")).unwrap();
+        let _ = create_directory(&temp_dir, Path::new("sub1/nested")).unwrap();
+
+        // 1. Move file into sub1
+        let moved = move_entry(&temp_dir, Path::new("file.tmt"), Path::new("sub1")).unwrap();
+        assert_eq!(moved.relative_path, "sub1/file.tmt");
+        assert!(!temp_dir.join("file.tmt").exists());
+        assert!(temp_dir.join("sub1/file.tmt").exists());
+
+        // 2. Move file from sub1 back to root (".")
+        let moved_root = move_entry(&temp_dir, Path::new("sub1/file.tmt"), Path::new(".")).unwrap();
+        assert_eq!(moved_root.relative_path, "file.tmt");
+        assert!(temp_dir.join("file.tmt").exists());
+
+        // 3. Move directory sub2 into sub1
+        let moved_dir = move_entry(&temp_dir, Path::new("sub2"), Path::new("sub1")).unwrap();
+        assert_eq!(moved_dir.relative_path, "sub1/sub2");
+        assert!(temp_dir.join("sub1/sub2").is_dir());
+
+        // 4. Boundary and sanity checks
+        // Cannot move directory into its own descendant
+        assert!(move_entry(&temp_dir, Path::new("sub1"), Path::new("sub1/nested")).is_err());
+        assert!(move_entry(&temp_dir, Path::new("sub1"), Path::new("sub1")).is_err());
+
+        // Cannot move vault root
+        assert!(move_entry(&temp_dir, Path::new("."), Path::new("sub1")).is_err());
+
+        // Traversal rejection
+        assert!(move_entry(&temp_dir, Path::new("../outside"), Path::new("sub1")).is_err());
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
