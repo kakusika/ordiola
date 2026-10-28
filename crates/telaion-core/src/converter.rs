@@ -1,8 +1,116 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tomet_ast::{
     Block, Document, Element, Inline, List, ListItem, Name, Paragraph, RawText, Section, Sigil,
     Span, Text,
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct TometMetadata {
+    pub id: Option<String>,
+    pub title: Option<String>,
+    pub lang: Option<String>,
+    #[serde(default)]
+    pub custom: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct TometConfig {
+    pub export_type: Option<String>,
+    pub export_path: Option<String>,
+}
+
+/// Extract metadata fields from a Tomet document string (e.g. `::meta{ id: foo, lang: ja }`)
+pub fn extract_tomet_metadata(source: &str) -> TometMetadata {
+    let mut meta = TometMetadata::default();
+    if let Some(start) = source.find("::meta") {
+        if let Some(open) = source[start..].find('{') {
+            let body_start = start + open + 1;
+            if let Some(close) = source[body_start..].find('}') {
+                let body = &source[body_start..body_start + close];
+                for line in body.lines() {
+                    let trimmed = line.trim().trim_end_matches(',');
+                    if let Some((k, v)) = trimmed.split_once(':') {
+                        let key = k.trim().to_string();
+                        let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
+                        match key.as_str() {
+                            "id" => meta.id = Some(val),
+                            "title" => meta.title = Some(val),
+                            "lang" => meta.lang = Some(val),
+                            _ if !key.is_empty() => {
+                                meta.custom.insert(key, val);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    meta
+}
+
+/// Inject or replace the `::meta` block in a Tomet document string
+pub fn inject_tomet_metadata(source: &str, meta: &TometMetadata) -> String {
+    let mut meta_lines = Vec::new();
+    meta_lines.push("::meta{".to_string());
+    if let Some(ref id) = meta.id {
+        meta_lines.push(format!("  id: {id},"));
+    }
+    if let Some(ref title) = meta.title {
+        meta_lines.push(format!("  title: \"{title}\","));
+    }
+    if let Some(ref lang) = meta.lang {
+        meta_lines.push(format!("  lang: {lang},"));
+    }
+    for (k, v) in &meta.custom {
+        meta_lines.push(format!("  {k}: \"{v}\","));
+    }
+    meta_lines.push("}".to_string());
+    let new_meta_block = meta_lines.join("\n");
+
+    if let Some(start) = source.find("::meta") {
+        if let Some(open) = source[start..].find('{') {
+            let body_start = start + open + 1;
+            if let Some(close) = source[body_start..].find('}') {
+                let end = body_start + close + 1;
+                let mut res = String::new();
+                res.push_str(&source[..start]);
+                res.push_str(&new_meta_block);
+                res.push_str(&source[end..]);
+                return res;
+            }
+        }
+    }
+
+    format!("{new_meta_block}\n\n{source}")
+}
+
+/// Extract export configuration from `::config(...)`
+pub fn extract_tomet_config(source: &str) -> TometConfig {
+    let mut config = TometConfig::default();
+    if let Some(start) = source.find("::config") {
+        if let Some(open) = source[start..].find('(') {
+            let body_start = start + open + 1;
+            if let Some(close) = source[body_start..].find(')') {
+                let body = &source[body_start..body_start + close];
+                for line in body.lines() {
+                    let trimmed = line.trim().trim_end_matches(',');
+                    if let Some((k, v)) = trimmed.split_once(':') {
+                        let key = k.trim();
+                        let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
+                        if key.contains("type") {
+                            config.export_type = Some(val);
+                        } else if key.contains("path") {
+                            config.export_path = Some(val);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    config
+}
 
 /// ProseMirror Document Node structure (schema: "doc")
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -452,6 +560,29 @@ pub fn prosemirror_to_tomet(doc: &ProseMirrorDoc) -> anyhow::Result<String> {
                 };
                 blocks.push(Block::Element(callout_el));
             }
+            "codeBlock" => {
+                let code_text = node
+                    .content
+                    .iter()
+                    .filter_map(|c| c.text.as_deref())
+                    .collect::<Vec<_>>()
+                    .join("");
+                let raw_content = vec![Block::Paragraph(Paragraph::new(
+                    vec![Inline::Raw(RawText::new(code_text, Span::dummy()))],
+                    Span::dummy(),
+                ))];
+                let code_el = Element {
+                    sigil: Sigil::Named(Name::bare("code")),
+                    placement: tomet_ast::Placement::Block,
+                    args: None,
+                    content: Some(raw_content),
+                    value: None,
+                    id: None,
+                    connects: Vec::new(),
+                    span: Span::dummy(),
+                };
+                blocks.push(Block::Element(code_el));
+            }
             _ => {}
         }
     }
@@ -559,5 +690,30 @@ mod tests {
         let content = std::fs::read_to_string("../../tmtroot/readme.tmt").unwrap();
         let res = tomet_to_prosemirror(&content);
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_extract_and_inject_metadata() {
+        let source = "::meta{\n  id: test-id,\n  lang: ja\n}\n\n=[ Title ]\n";
+        let meta = extract_tomet_metadata(source);
+        assert_eq!(meta.id.as_deref(), Some("test-id"));
+        assert_eq!(meta.lang.as_deref(), Some("ja"));
+
+        let mut updated = meta.clone();
+        updated.title = Some("New Title".to_string());
+        updated.custom.insert("author".to_string(), "Alice".to_string());
+
+        let injected = inject_tomet_metadata(source, &updated);
+        assert!(injected.contains("id: test-id"));
+        assert!(injected.contains("title: \"New Title\""));
+        assert!(injected.contains("author: \"Alice\""));
+    }
+
+    #[test]
+    fn test_extract_config() {
+        let source = "::config(\n  export: {\n    type: commonmark,\n    path: \"README.md\"\n  }\n)\n";
+        let cfg = extract_tomet_config(source);
+        assert_eq!(cfg.export_type.as_deref(), Some("commonmark"));
+        assert_eq!(cfg.export_path.as_deref(), Some("README.md"));
     }
 }
