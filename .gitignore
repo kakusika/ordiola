@@ -13,6 +13,9 @@ node_modules/
 #== git worktrees
 .worktrees/
 
+#== Tauri build schemas
+apps/tauri/gen/schemas/
+
 
 #== Test output
 tests/store/
