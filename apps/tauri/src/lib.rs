@@ -141,6 +141,21 @@ fn write_text_file(path: &str, content: &str, state: State<'_, AppState>) -> Res
 }
 
 #[tauri::command]
+fn extract_metadata(source: &str) -> telaion_core::TometMetadata {
+    telaion_core::extract_tomet_metadata(source)
+}
+
+#[tauri::command]
+fn inject_metadata(source: &str, meta: telaion_core::TometMetadata) -> String {
+    telaion_core::inject_tomet_metadata(source, &meta)
+}
+
+#[tauri::command]
+fn extract_config(source: &str) -> telaion_core::TometConfig {
+    telaion_core::extract_tomet_config(source)
+}
+
+#[tauri::command]
 fn parse_tomet_string(source: &str) -> Result<ProseMirrorDoc, String> {
     tomet_to_prosemirror(source).map_err(|e| e.to_string())
 }
@@ -300,6 +315,9 @@ pub fn run_with_vault(initial_vault: Option<PathBuf>) {
             create_directory,
             rename_entry,
             delete_entry,
+            extract_metadata,
+            inject_metadata,
+            extract_config,
             parse_tomet_string,
             serialize_prosemirror_doc,
             read_tomet_document,

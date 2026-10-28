@@ -4,6 +4,7 @@
   import StarterKit from "@tiptap/starter-kit";
   import FileTreeNode from "$lib/FileTreeNode.svelte";
   import CodeEditor from "$lib/CodeEditor.svelte";
+  import { Callout } from "$lib/calloutExtension";
   import type {
     FileEntry,
     VaultEntry,
@@ -62,12 +63,35 @@
   let contextMenu = $state<ContextMenuState | null>(null);
   let deleteConfirmModal = $state<DeleteConfirmState | null>(null);
 
-  // Document metadata state
-  let docMeta = $state<{ id: string; title: string; lang: string }>({
-    id: "doc-telaion",
+  // Document metadata & configuration state
+  interface TometDocMeta {
+    id: string;
+    title: string;
+    lang: string;
+    custom: Record<string, string>;
+  }
+
+  interface TometDocConfig {
+    export_type: string;
+    export_path: string;
+  }
+
+  let docMeta = $state<TometDocMeta>({
+    id: "doc-readme",
     title: "Telaion ワークスペース",
     lang: "ja",
+    custom: {},
   });
+
+  let docConfig = $state<TometDocConfig>({
+    export_type: "commonmark",
+    export_path: "README.md",
+  });
+
+  let isMetaCardExpanded = $state<boolean>(false);
+  let metaActiveTab = $state<"meta" | "config">("meta");
+  let newCustomKey = $state<string>("");
+  let newCustomValue = $state<string>("");
 
   const defaultTometContent = `::config(
   export: {
@@ -105,6 +129,7 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
               levels: [1, 2, 3, 4, 5, 6],
             },
           }),
+          Callout,
         ],
         content: `<h1>=[ Telaion: 次世代 Tomet エディタ ]=</h1><p>Telaion は <strong>Tomet</strong> 言語のためのワークスペース型デスクトップエディタです。</p>`,
         editorProps: {
@@ -634,6 +659,9 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
       } else {
         rawTextContent = `// Content of ${activeFile}\n`;
       }
+      if (activeFile.endsWith(".tmt")) {
+        loadTometMetaAndConfig(rawTextContent);
+      }
       isSaved = true;
       return;
     }
@@ -650,6 +678,9 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
         statusMessage = `ロード完了: ${activeFile}`;
         return;
       }
+
+      // Load metadata and config from Tomet document
+      await loadTometMetaAndConfig(text);
 
       // If opening .tmt file in hybrid/full mode, parse into Tiptap
       if (editMode === "hybrid" || editMode === "full") {
@@ -670,6 +701,113 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
     } catch (err: any) {
       console.error("Failed to read file:", err);
       statusMessage = `読み込みエラー: ${err?.message || err}`;
+    }
+  }
+
+  async function loadTometMetaAndConfig(source: string) {
+    if (isTauri) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const meta = await invoke<any>("extract_metadata", { source });
+        docMeta = {
+          id: meta.id || "",
+          title: meta.title || "",
+          lang: meta.lang || "ja",
+          custom: meta.custom || {},
+        };
+        const cfg = await invoke<any>("extract_config", { source });
+        docConfig = {
+          export_type: cfg.export_type || "",
+          export_path: cfg.export_path || "",
+        };
+      } catch (e) {
+        console.warn("Failed to extract metadata/config:", e);
+      }
+    } else {
+      // Mock / fallback regex extraction
+      const idMatch = source.match(/id:\s*([^\s,]+)/);
+      const titleMatch = source.match(/title:\s*["']([^"']+)["']/);
+      const langMatch = source.match(/lang:\s*([^\s,]+)/);
+      docMeta = {
+        id: idMatch ? idMatch[1] : "",
+        title: titleMatch ? titleMatch[1] : "",
+        lang: langMatch ? langMatch[1] : "ja",
+        custom: {},
+      };
+      const expTypeMatch = source.match(/type:\s*([^\s,]+)/);
+      const expPathMatch = source.match(/path:\s*["']([^"']+)["']/);
+      docConfig = {
+        export_type: expTypeMatch ? expTypeMatch[1] : "",
+        export_path: expPathMatch ? expPathMatch[1] : "",
+      };
+    }
+  }
+
+  async function syncMetaToDocument() {
+    if (isTauri) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const updated = await invoke<string>("inject_metadata", {
+          source: rawTextContent,
+          meta: {
+            id: docMeta.id || null,
+            title: docMeta.title || null,
+            lang: docMeta.lang || null,
+            custom: docMeta.custom,
+          },
+        });
+        rawTextContent = updated;
+        isSaved = false;
+        statusMessage = "メタデータを文書に反映しました";
+      } catch (e: any) {
+        statusMessage = `メタデータ反映失敗: ${e?.message || e}`;
+      }
+    } else {
+      statusMessage = "メタデータを更新しました（ブラウザモック）";
+    }
+  }
+
+  function addCustomMetaField() {
+    const k = newCustomKey.trim();
+    if (k) {
+      docMeta.custom[k] = newCustomValue.trim();
+      docMeta.custom = { ...docMeta.custom };
+      newCustomKey = "";
+      newCustomValue = "";
+    }
+  }
+
+  function removeCustomMetaField(key: string) {
+    delete docMeta.custom[key];
+    docMeta.custom = { ...docMeta.custom };
+  }
+
+  function insertTometBlock(kind: string) {
+    let snippet = "";
+    if (kind === "note") {
+      snippet = `::{callout(note)}\nここにノート・補足事項を記述します。\n::\n`;
+    } else if (kind === "tip") {
+      snippet = `::{callout(tip)}\nここに有用な Tips やヒントを記述します。\n::\n`;
+    } else if (kind === "warning") {
+      snippet = `::{callout(warning)}\nここに注意事項・警告を記述します。\n::\n`;
+    } else if (kind === "danger") {
+      snippet = `::{callout(danger)}\nここに重大な危険・破壊的変更への注意を記述します。\n::\n`;
+    } else if (kind === "code") {
+      snippet = `::{code(typescript)}\nconsole.log("Hello, Tomet!");\n::\n`;
+    }
+
+    if (editMode === "source") {
+      rawTextContent = rawTextContent ? rawTextContent.trimEnd() + "\n\n" + snippet : snippet;
+      isSaved = false;
+      statusMessage = `${kind} ブロックを挿入しました`;
+    } else if (editor) {
+      if (kind === "code") {
+        editor.chain().focus().setCodeBlock().insertContent('console.log("Hello, Tomet!");').run();
+      } else {
+        editor.chain().focus().insertContent(`<div data-callout="${kind}" class="tomet-callout-card tomet-callout-${kind}"><p>ここに${kind}の本文を入力</p></div>`).run();
+      }
+      isSaved = false;
+      statusMessage = `${kind} ブロックを挿入しました`;
     }
   }
 
@@ -1033,6 +1171,197 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
       </div>
     </header>
 
+    {#if isTmtFile}
+      <!-- Tomet Block Insert Bar -->
+      <div class="h-9 bg-stone-900/80 border-b border-stone-800/80 px-6 flex items-center justify-between text-xs shrink-0 select-none backdrop-blur-xs">
+        <div class="flex items-center gap-1.5 overflow-x-auto py-1">
+          <span class="text-[10px] font-bold text-stone-500 tracking-wider uppercase mr-1">Tomet ブロック:</span>
+          <button
+            class="px-2 py-0.5 rounded bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 hover:text-sky-200 border border-sky-500/30 flex items-center gap-1 transition cursor-pointer text-[11px]"
+            onclick={() => insertTometBlock('note')}
+            title="Note (補足・注記) コールアウトを挿入"
+          >
+            <span>💡</span>
+            <span>Note</span>
+          </button>
+          <button
+            class="px-2 py-0.5 rounded bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 flex items-center gap-1 transition cursor-pointer text-[11px]"
+            onclick={() => insertTometBlock('tip')}
+            title="Tip (ヒント) コールアウトを挿入"
+          >
+            <span>🚀</span>
+            <span>Tip</span>
+          </button>
+          <button
+            class="px-2 py-0.5 rounded bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 hover:text-amber-200 border border-amber-500/30 flex items-center gap-1 transition cursor-pointer text-[11px]"
+            onclick={() => insertTometBlock('warning')}
+            title="Warning (注意事項) コールアウトを挿入"
+          >
+            <span>⚠️</span>
+            <span>Warning</span>
+          </button>
+          <button
+            class="px-2 py-0.5 rounded bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-rose-200 border border-rose-500/30 flex items-center gap-1 transition cursor-pointer text-[11px]"
+            onclick={() => insertTometBlock('danger')}
+            title="Danger (重大・危険) コールアウトを挿入"
+          >
+            <span>🛑</span>
+            <span>Danger</span>
+          </button>
+          <button
+            class="px-2 py-0.5 rounded bg-stone-800/60 hover:bg-stone-700/60 text-stone-300 hover:text-stone-100 border border-stone-700 flex items-center gap-1 transition cursor-pointer text-[11px]"
+            onclick={() => insertTometBlock('code')}
+            title="コードブロック (code) を挿入"
+          >
+            <span>💻</span>
+            <span>Code Block</span>
+          </button>
+        </div>
+
+        <button
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-stone-800/40 hover:bg-stone-800 text-stone-300 hover:text-stone-100 text-[11px] border border-stone-700/50 transition cursor-pointer"
+          onclick={() => (isMetaCardExpanded = !isMetaCardExpanded)}
+          title="文書メタデータ・エクスポート設定パネルを開閉"
+        >
+          <span>📜</span>
+          <span>設定: {docMeta.id || '未設定'}</span>
+          <span class="text-[9px] text-stone-400">{isMetaCardExpanded ? '▲' : '▼'}</span>
+        </button>
+      </div>
+
+      <!-- Collapsible Document Meta / Config Inspector Card -->
+      {#if isMetaCardExpanded}
+        <div class="bg-stone-900/90 border-b border-stone-800 px-6 py-3 text-xs space-y-3 backdrop-blur-md">
+          <div class="flex items-center justify-between border-b border-stone-800 pb-2">
+            <div class="flex items-center gap-2">
+              <button
+                class="px-2.5 py-1 rounded font-medium transition cursor-pointer {metaActiveTab === 'meta' ? 'bg-stone-800 text-stone-100 border border-stone-700' : 'text-stone-400 hover:text-stone-200'}"
+                onclick={() => (metaActiveTab = 'meta')}
+              >
+                ::meta (文書情報)
+              </button>
+              <button
+                class="px-2.5 py-1 rounded font-medium transition cursor-pointer {metaActiveTab === 'config' ? 'bg-stone-800 text-stone-100 border border-stone-700' : 'text-stone-400 hover:text-stone-200'}"
+                onclick={() => (metaActiveTab = 'config')}
+              >
+                ::config (エクスポート設定)
+              </button>
+            </div>
+
+            <button
+              class="px-3 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-medium text-[11px] shadow-sm transition cursor-pointer flex items-center gap-1"
+              onclick={syncMetaToDocument}
+              title="変更したメタデータをドキュメント先頭に反映します"
+            >
+              <span>🔄</span>
+              <span>文書に反映</span>
+            </button>
+          </div>
+
+          {#if metaActiveTab === 'meta'}
+            <div class="grid grid-cols-3 gap-3">
+              <div>
+                <span class="text-stone-400 block text-[10px] mb-1 font-mono">id:</span>
+                <input
+                  type="text"
+                  bind:value={docMeta.id}
+                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 font-mono text-xs focus:outline-none focus:border-sky-500"
+                  placeholder="doc-id"
+                />
+              </div>
+              <div>
+                <span class="text-stone-400 block text-[10px] mb-1 font-mono">title:</span>
+                <input
+                  type="text"
+                  bind:value={docMeta.title}
+                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 text-xs focus:outline-none focus:border-sky-500"
+                  placeholder="ドキュメントのタイトル"
+                />
+              </div>
+              <div>
+                <span class="text-stone-400 block text-[10px] mb-1 font-mono">lang:</span>
+                <input
+                  type="text"
+                  bind:value={docMeta.lang}
+                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 font-mono text-xs focus:outline-none focus:border-sky-500"
+                  placeholder="ja / en"
+                />
+              </div>
+            </div>
+
+            <!-- Custom properties -->
+            <div class="pt-2 border-t border-stone-800/80 space-y-1.5">
+              <span class="text-[10px] font-semibold text-stone-400 uppercase tracking-wider block">カスタム属性:</span>
+              <div class="space-y-1">
+                {#each Object.entries(docMeta.custom) as [k, v] (k)}
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-stone-300 w-28 truncate text-[11px]">{k}:</span>
+                    <input
+                      type="text"
+                      bind:value={docMeta.custom[k]}
+                      class="flex-1 bg-stone-950 border border-stone-800 rounded px-2 py-0.5 text-stone-200 text-xs focus:outline-none focus:border-stone-600"
+                    />
+                    <button
+                      class="px-2 py-0.5 text-stone-500 hover:text-red-400 transition cursor-pointer text-xs"
+                      onclick={() => removeCustomMetaField(k)}
+                      title="属性を削除"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                {/each}
+              </div>
+
+              <!-- Add custom attribute row -->
+              <div class="flex items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  bind:value={newCustomKey}
+                  placeholder="新しいキー (例: author)"
+                  class="w-36 bg-stone-950 border border-stone-800 rounded px-2 py-0.5 text-stone-300 font-mono text-[11px] focus:outline-none focus:border-sky-500"
+                />
+                <input
+                  type="text"
+                  bind:value={newCustomValue}
+                  placeholder="値"
+                  class="flex-1 bg-stone-950 border border-stone-800 rounded px-2 py-0.5 text-stone-300 text-[11px] focus:outline-none focus:border-sky-500"
+                  onkeydown={(e) => { if (e.key === 'Enter') addCustomMetaField(); }}
+                />
+                <button
+                  class="px-2.5 py-0.5 rounded bg-stone-800 hover:bg-stone-700 text-stone-200 text-[11px] transition cursor-pointer"
+                  onclick={addCustomMetaField}
+                >
+                  ＋ 追加
+                </button>
+              </div>
+            </div>
+          {:else}
+            <!-- Config Tab -->
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <span class="text-stone-400 block text-[10px] mb-1 font-mono">export.type:</span>
+                <input
+                  type="text"
+                  bind:value={docConfig.export_type}
+                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 font-mono text-xs focus:outline-none focus:border-sky-500"
+                  placeholder="commonmark"
+                />
+              </div>
+              <div>
+                <span class="text-stone-400 block text-[10px] mb-1 font-mono">export.path:</span>
+                <input
+                  type="text"
+                  bind:value={docConfig.export_path}
+                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 font-mono text-xs focus:outline-none focus:border-sky-500"
+                  placeholder="README.md"
+                />
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+    {/if}
+
     <!-- CodeMirror 6 Source Text Editor (Active when editMode === 'source') -->
     <div class="flex-1 overflow-hidden relative" class:hidden={editMode !== 'source'}>
       <CodeEditor
@@ -1049,41 +1378,6 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
       class:hidden={editMode === 'source'}
     >
       <div class="max-w-3xl mx-auto">
-        <!-- Tomet Document Meta Inspector Card -->
-        {#if isTmtFile}
-          <div class="tomet-meta-card text-xs">
-            <div class="flex items-center justify-between pb-2 mb-2 border-b border-stone-800 text-stone-400 font-semibold tracking-wider uppercase text-[10px]">
-              <span>::meta (Document Metadata)</span>
-              <span class="text-stone-400 font-mono">Tomet Header</span>
-            </div>
-            <div class="grid grid-cols-3 gap-3">
-              <div>
-                <span class="text-stone-400 block text-[10px] mb-0.5">id:</span>
-                <input
-                  type="text"
-                  bind:value={docMeta.id}
-                  class="w-full bg-stone-900 border border-stone-800 rounded px-2 py-1 text-stone-200 font-mono text-xs focus:outline-none focus:border-stone-600"
-                />
-              </div>
-              <div>
-                <span class="text-stone-400 block text-[10px] mb-0.5">title:</span>
-                <input
-                  type="text"
-                  bind:value={docMeta.title}
-                  class="w-full bg-stone-900 border border-stone-800 rounded px-2 py-1 text-stone-200 text-xs focus:outline-none focus:border-stone-600"
-                />
-              </div>
-              <div>
-                <span class="text-stone-400 block text-[10px] mb-0.5">lang:</span>
-                <input
-                  type="text"
-                  bind:value={docMeta.lang}
-                  class="w-full bg-stone-900 border border-stone-800 rounded px-2 py-1 text-stone-200 font-mono text-xs focus:outline-none focus:border-stone-600"
-                />
-              </div>
-            </div>
-          </div>
-        {/if}
 
         <!-- Mode Indicator Banner -->
         <div class="mb-4 px-3 py-1.5 rounded-md text-[11px] flex items-center gap-2 border {editMode === 'hybrid' ? 'bg-amber-950/20 text-amber-300 border-amber-900/40' : 'bg-emerald-950/20 text-emerald-300 border-emerald-900/40'}">
