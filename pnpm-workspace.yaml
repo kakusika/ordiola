@@ -3,6 +3,7 @@ packages:
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - '@telaion/ui@0.1.1'
+  - '@telaion/editor@0.1.3'
+  - '@telaion/ui@0.1.3'
 onlyBuiltDependencies:
   - esbuild

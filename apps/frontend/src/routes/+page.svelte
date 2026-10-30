@@ -3,7 +3,8 @@
   import { Editor } from "@tiptap/core";
   import StarterKit from "@tiptap/starter-kit";
   import FileTreeNode from "$lib/FileTreeNode.svelte";
-  import CodeEditor from "$lib/CodeEditor.svelte";
+  import { CodeEditor } from "@telaion/editor";
+  import { sourceExtras, sourceLanguage } from "$lib/sourceEditor";
   import ConfirmDelete from "$lib/ConfirmDelete.svelte";
   import ConfirmUnsaved from "$lib/ConfirmUnsaved.svelte";
   import { Callout } from "$lib/calloutExtension";
@@ -1731,12 +1732,16 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
 
     <!-- CodeMirror 6 Source Text Editor (Active when editMode === 'source') -->
     <div class="flex-1 overflow-hidden relative" class:hidden={editMode !== 'source'}>
-      <CodeEditor
-        content={rawTextContent}
-        filePath={activePath}
-        onChange={handleSourceChange}
-        onSave={saveCurrentDocument}
-      />
+      <div class="h-full w-full overflow-hidden bg-stone-950 select-text">
+        <CodeEditor
+          label="ソース"
+          content={rawTextContent}
+          language={sourceLanguage(activePath)}
+          extensions={sourceExtras}
+          onChange={handleSourceChange}
+          onSave={saveCurrentDocument}
+        />
+      </div>
     </div>
 
     <!-- Tiptap WYSIWYG / Hybrid Editor (Active when editMode !== 'source') -->
