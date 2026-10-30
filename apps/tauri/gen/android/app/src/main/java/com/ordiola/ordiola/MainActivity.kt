@@ -1,4 +1,4 @@
-package com.tomet.ordiola
+package com.ordiola.ordiola
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

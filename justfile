@@ -15,7 +15,7 @@ release:
     cargo build --release
 
 dist := "dist"
-package := "com.tomet.ordiola"
+package := "com.ordiola.ordiola"
 activity := package + "/.MainActivity"
 
 # Clean all aggregated build outputs in dist/

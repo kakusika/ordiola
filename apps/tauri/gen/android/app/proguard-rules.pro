@@ -22,7 +22,7 @@
 
 # Tauri core & plugins reflection / JNI
 -keep class app.tauri.** { *; }
--keep class com.tomet.ordiola.** { *; }
+-keep class com.ordiola.ordiola.** { *; }
 
 # WebView JavascriptInterface
 -keepclassmembers class * {
