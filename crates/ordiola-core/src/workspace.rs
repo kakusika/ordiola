@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_list_directory_respects_gitignore() {
-        let temp_dir = std::env::temp_dir().join("telaion_test_workspace");
+        let temp_dir = std::env::temp_dir().join("ordiola_test_workspace");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 
@@ -538,7 +538,7 @@ mod tests {
 
     #[test]
     fn test_file_and_directory_operations() {
-        let temp_dir = std::env::temp_dir().join("telaion_test_ops");
+        let temp_dir = std::env::temp_dir().join("ordiola_test_ops");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 
@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn test_list_all_files() {
-        let temp_dir = std::env::temp_dir().join("telaion_test_quick_open");
+        let temp_dir = std::env::temp_dir().join("ordiola_test_quick_open");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn test_move_entry() {
-        let temp_dir = std::env::temp_dir().join("telaion_test_move");
+        let temp_dir = std::env::temp_dir().join("ordiola_test_move");
         let _ = fs::remove_dir_all(&temp_dir);
         fs::create_dir_all(&temp_dir).unwrap();
 

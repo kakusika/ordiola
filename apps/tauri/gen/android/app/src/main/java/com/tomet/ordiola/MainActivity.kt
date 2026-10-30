@@ -1,4 +1,4 @@
-package com.tomet.telaion
+package com.tomet.ordiola
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

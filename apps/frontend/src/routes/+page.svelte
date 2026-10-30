@@ -36,7 +36,7 @@
   let isTmtFile = $derived(activeTab ? activeTab.isTmt : false);
 
   // Vault State
-  let vaultName = $state<string>("telaion");
+  let vaultName = $state<string>("ordiola");
   let vaultPath = $state<string>(".");
   let recentVaults = $state<VaultEntry[]>([]);
   let isVaultMenuOpen = $state<boolean>(false);
@@ -112,7 +112,7 @@
 
   let docMeta = $state<TometDocMeta>({
     id: "doc-readme",
-    title: "Telaion ワークスペース",
+    title: "Ordiola ワークスペース",
     lang: "ja",
     custom: {},
   });
@@ -138,9 +138,9 @@
   lang: ja
 }
 
-=[ Telaion: 次世代 Tomet エディタ ]=
+=[ Ordiola: 次世代 Tomet エディタ ]=
 
-Telaion は Tomet 言語のためのワークスペース型デスクトップエディタです。
+Ordiola は Tomet 言語のためのワークスペース型デスクトップエディタです。
 
 ==[ 主な特徴 ]==
 
@@ -165,7 +165,7 @@ Telaion は Tomet 言語のためのワークスペース型デスクトップ�
           }),
           Callout,
         ],
-        content: `<h1>=[ Telaion: 次世代 Tomet エディタ ]=</h1><p>Telaion は <strong>Tomet</strong> 言語のためのワークスペース型デスクトップエディタです。</p>`,
+        content: `<h1>=[ Ordiola: 次世代 Tomet エディタ ]=</h1><p>Ordiola は <strong>Tomet</strong> 言語のためのワークスペース型デスクトップエディタです。</p>`,
         editorProps: {
           attributes: {
             class: "focus:outline-none min-h-[500px] text-stone-200 text-base leading-relaxed",

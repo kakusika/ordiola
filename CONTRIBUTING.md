@@ -1,6 +1,6 @@
 <!-- Generated from tmtroot/contributing.tmt. Edit that, then `tomet export .`. -->
 
-# Contributing to Telaion
+# Contributing to Ordiola
 
 ## Documentation Policy
 

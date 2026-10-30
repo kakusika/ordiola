@@ -1,6 +1,6 @@
 <!-- Generated from tmtroot/readme.tmt. Edit that, then `tomet export .`. -->
 
-# Telaion
+# Ordiola
 
 Workspace document editor for Tomet with hybrid block and WYSIWYG editing, built on Tauri v2 and Svelte 5.
 

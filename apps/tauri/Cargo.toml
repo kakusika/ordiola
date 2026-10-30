@@ -1,24 +1,24 @@
 [package]
-name = "telaion-tauri"
-default-run = "telaion"
+name = "ordiola-tauri"
+default-run = "ordiola"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "telaion"
+name = "ordiola"
 path = "./src/main.rs"
 
 [lib]
-name = "telaion_lib"
+name = "ordiola_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { workspace = true }
 
 [dependencies]
-telaion-core = { workspace = true }
-telaion-config = { workspace = true }
+ordiola-core = { workspace = true }
+ordiola-config = { workspace = true }
 tauri = { workspace = true }
 tauri-runtime-wry = { workspace = true }
 tauri-plugin-opener = { workspace = true }

@@ -3866,7 +3866,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "telaion-config"
+name = "ordiola-config"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3878,7 +3878,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "telaion-core"
+name = "ordiola-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3893,7 +3893,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "telaion-tauri"
+name = "ordiola-tauri"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -3905,8 +3905,8 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-runtime-wry",
- "telaion-config",
- "telaion-core",
+ "ordiola-config",
+ "ordiola-core",
 ]
 
 [[package]]

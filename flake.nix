@@ -1,5 +1,5 @@
 {
-  description = "Telaion - Workspace document editor for Tomet";
+  description = "Ordiola - Workspace document editor for Tomet";
 
   nixConfig = {
     extra-substituters = [ "https://tomet.cachix.org" ];

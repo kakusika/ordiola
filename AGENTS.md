@@ -1,6 +1,6 @@
 <!-- Generated from tmtroot/agents.tmt. Edit that, then `tomet export .`. -->
 
-# Telaion
+# Ordiola
 
 ## Core Philosophy & Principles
 
@@ -38,7 +38,7 @@ All Markdown files (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`) are generated b
 
 ## Project overview
 
-`telaion` is a workspace document editor for Tomet (`.tmt`) documents, supporting both block hybrid editing and full block WYSIWYG editing, built on Tauri v2, Svelte 5, and Tiptap/ProseMirror.
+`ordiola` is a workspace document editor for Tomet (`.tmt`) documents, supporting both block hybrid editing and full block WYSIWYG editing, built on Tauri v2, Svelte 5, and Tiptap/ProseMirror.
 
 Read `CONTRIBUTING.md` for the contribution workflow, commit conventions, and verification steps.
 

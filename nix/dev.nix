@@ -101,6 +101,6 @@ mkShell rec {
 
   shellHook = ''
     export XDG_DATA_DIRS="$GSETTINGS_SCHEMAS_PATH:$XDG_DATA_DIRS"
-    echo "🪟 telaion - Tomet Workspace Document Editor"
+    echo "🪟 ordiola - Tomet Workspace Document Editor"
   '';
 }

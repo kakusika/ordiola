@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const QUALIFIER: &str = "com";
 const ORGANIZATION: &str = "tomet";
-const APPLICATION: &str = "telaion";
+const APPLICATION: &str = "ordiola";
 const CONFIG_FILE_NAME: &str = "config.json";
 
 /// Entry representing a previously opened vault.
@@ -35,7 +35,7 @@ impl VaultEntry {
     }
 }
 
-/// Global Telaion application configuration.
+/// Global Ordiola application configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct AppConfig {
     pub recent_vaults: Vec<VaultEntry>,

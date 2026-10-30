@@ -11,7 +11,7 @@
 
 ${macro.generated_by(self.path)}
 
-=[ Telaion ]
+=[ Ordiola ]
 
 Workspace document editor for Tomet with hybrid block and WYSIWYG editing, built on Tauri v2 and Svelte 5.
 

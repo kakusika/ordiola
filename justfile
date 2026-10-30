@@ -1,4 +1,4 @@
-# telaion development tasks.
+# ordiola development tasks.
 # Run `just` to see everything available.
 
 default:
@@ -15,7 +15,7 @@ release:
     cargo build --release
 
 dist := "dist"
-package := "com.tomet.telaion"
+package := "com.tomet.ordiola"
 activity := package + "/.MainActivity"
 
 # Clean all aggregated build outputs in dist/
@@ -33,12 +33,12 @@ desktop-dev:
 desktop-release:
     pnpm tauri build --no-bundle
     @mkdir -p {{dist}}
-    cp --remove-destination target/release/telaion {{dist}}/telaion
-    @echo "Built: {{dist}}/telaion"
+    cp --remove-destination target/release/ordiola {{dist}}/ordiola
+    @echo "Built: {{dist}}/ordiola"
 
 # Build and run desktop release binary (with optional vault path)
 desktop-run *ARGS: desktop-release
-    ./{{dist}}/telaion {{ARGS}}
+    ./{{dist}}/ordiola {{ARGS}}
 
 #[ Android ]
 
@@ -50,8 +50,8 @@ android-dev *ARGS:
 android-build *ARGS:
     pnpm tauri android build --debug --apk {{ARGS}}
     @mkdir -p {{dist}}
-    find apps/tauri/gen/android/app/build/outputs/apk -name "*debug*.apk" -exec cp --remove-destination {} {{dist}}/telaion-debug.apk \;
-    @echo "Built: {{dist}}/telaion-debug.apk"
+    find apps/tauri/gen/android/app/build/outputs/apk -name "*debug*.apk" -exec cp --remove-destination {} {{dist}}/ordiola-debug.apk \;
+    @echo "Built: {{dist}}/ordiola-debug.apk"
 
 android_cflags := "-fno-unwind-tables -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections"
 android_rustflags := "-C force-unwind-tables=no -C link-arg=-Wl,--icf=all -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all"
@@ -67,19 +67,19 @@ android-release *ARGS:
     fi
     RUSTFLAGS="{{android_rustflags}}" CFLAGS="{{android_cflags}}" pnpm tauri android build --apk ${target_opt} {{ARGS}}
     mkdir -p {{dist}}
-    find apps/tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp --remove-destination {} {{dist}}/telaion.apk \;
-    echo "Built: {{dist}}/telaion.apk"
+    find apps/tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp --remove-destination {} {{dist}}/ordiola.apk \;
+    echo "Built: {{dist}}/ordiola.apk"
 
 # Build Android fat APK containing all architectures
 android-release-universal *ARGS:
     RUSTFLAGS="{{android_rustflags}}" CFLAGS="{{android_cflags}}" pnpm tauri android build --apk {{ARGS}}
     @mkdir -p {{dist}}
-    find apps/tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp --remove-destination {} {{dist}}/telaion-universal.apk \;
-    @echo "Built: {{dist}}/telaion-universal.apk"
+    find apps/tauri/gen/android/app/build/outputs/apk -name "*release*.apk" -exec cp --remove-destination {} {{dist}}/ordiola-universal.apk \;
+    @echo "Built: {{dist}}/ordiola-universal.apk"
 
 # Install the built debug APK on connected Android device/emulator
 android-install:
-    adb install -r {{dist}}/telaion-debug.apk
+    adb install -r {{dist}}/ordiola-debug.apk
 
 # Install and launch on connected Android device/emulator
 android-launch: android-install
@@ -89,11 +89,11 @@ android-launch: android-install
 
 # Run frontend development server
 frontend-dev:
-    pnpm --filter @telaion/frontend dev
+    pnpm --filter @ordiola/frontend dev
 
 # Build frontend production bundle
 frontend-build:
-    pnpm --filter @telaion/frontend build
+    pnpm --filter @ordiola/frontend build
 
 # Install frontend dependencies
 frontend-install:
@@ -106,7 +106,7 @@ alias dev := desktop-dev
 
 # Run built desktop binary directly without rebuilding
 run *ARGS:
-    @if [ -f {{dist}}/telaion ]; then ./{{dist}}/telaion {{ARGS}}; else ./target/release/telaion {{ARGS}}; fi
+    @if [ -f {{dist}}/ordiola ]; then ./{{dist}}/ordiola {{ARGS}}; else ./target/release/ordiola {{ARGS}}; fi
 
 # Backward-compatible aliases
 alias tauri-build := desktop-release

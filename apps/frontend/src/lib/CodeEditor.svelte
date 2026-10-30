@@ -24,8 +24,8 @@
   let view: EditorView | null = null;
   const languageCompartment = new Compartment();
 
-  // Custom theme tailored for Telaion's stone palette
-  const telaionEditorTheme = EditorView.theme({
+  // Custom theme tailored for Ordiola's stone palette
+  const ordiolaEditorTheme = EditorView.theme({
     "&": {
       height: "100%",
       fontSize: "14px",
@@ -95,7 +95,7 @@
       doc: content,
       extensions: [
         basicSetup,
-        telaionEditorTheme,
+        ordiolaEditorTheme,
         oneDark,
         languageCompartment.of(getLanguageExtension(filePath)),
         saveKeymap,

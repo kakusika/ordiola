@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["apps/tauri", "crates/telaion-config", "crates/telaion-core"]
+members = ["apps/tauri", "crates/ordiola-config", "crates/ordiola-core"]
 default-members = ["apps/tauri"]
 
 [workspace.package]
@@ -10,8 +10,8 @@ rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-telaion-config = { path = "crates/telaion-config" }
-telaion-core = { path = "crates/telaion-core" }
+ordiola-config = { path = "crates/ordiola-config" }
+ordiola-core = { path = "crates/ordiola-core" }
 
 #= Tomet
 tomet-ast = { git = "https://github.com/tomet-lang/tomet.git" }

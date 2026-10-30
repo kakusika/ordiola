@@ -22,14 +22,14 @@ in
 rustPlatform.buildRustPackage rec {
   inherit src;
 
-  pname = "telaion";
+  pname = "ordiola";
   version = "0.1.0";
 
   cargoLock.lockFile = "${src}/Cargo.lock";
   cargoTestFlags = cargoBuildFlags;
   cargoBuildFlags = [
     "-p"
-    "telaion-tauri"
+    "ordiola-tauri"
   ];
 
   pnpmDeps = fetchPnpmDeps {
@@ -58,8 +58,8 @@ rustPlatform.buildRustPackage rec {
   ];
 
   meta = with lib; {
-    description = "Telaion - Workspace document editor for Tomet";
+    description = "Ordiola - Workspace document editor for Tomet";
     platforms = platforms.all;
-    mainProgram = "telaion";
+    mainProgram = "ordiola";
   };
 }

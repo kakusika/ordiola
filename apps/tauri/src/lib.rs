@@ -2,8 +2,8 @@ use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
-use telaion_config::{AppConfig, VaultEntry};
-use telaion_core::{FileEntry, ProseMirrorDoc, prosemirror_to_tomet, tomet_to_prosemirror};
+use ordiola_config::{AppConfig, VaultEntry};
+use ordiola_core::{FileEntry, ProseMirrorDoc, prosemirror_to_tomet, tomet_to_prosemirror};
 
 /// Global application state managed by Tauri
 pub struct AppState {
@@ -78,7 +78,7 @@ fn switch_vault(
     restart_watcher(&app_handle, &canonical, &state);
 
     // Scan initial root directory
-    let files = telaion_core::list_directory(&canonical, &canonical).map_err(|e| e.to_string())?;
+    let files = ordiola_core::list_directory(&canonical, &canonical).map_err(|e| e.to_string())?;
     let config = state.config.lock().map_err(|e| e.to_string())?;
     let name = canonical
         .file_name()
@@ -123,7 +123,7 @@ fn list_directory(
         _ => vault_root.clone(),
     };
 
-    telaion_core::list_directory(&vault_root, &target_dir).map_err(|e| e.to_string())
+    ordiola_core::list_directory(&vault_root, &target_dir).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -132,7 +132,7 @@ fn list_all_files(state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> 
         let current = state.current_vault.lock().map_err(|e| e.to_string())?;
         current.clone()
     };
-    telaion_core::list_all_files(&vault_root).map_err(|e| e.to_string())
+    ordiola_core::list_all_files(&vault_root).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -161,18 +161,18 @@ fn write_text_file(path: &str, content: &str, state: State<'_, AppState>) -> Res
 }
 
 #[tauri::command]
-fn extract_metadata(source: &str) -> telaion_core::TometMetadata {
-    telaion_core::extract_tomet_metadata(source)
+fn extract_metadata(source: &str) -> ordiola_core::TometMetadata {
+    ordiola_core::extract_tomet_metadata(source)
 }
 
 #[tauri::command]
-fn inject_metadata(source: &str, meta: telaion_core::TometMetadata) -> String {
-    telaion_core::inject_tomet_metadata(source, &meta)
+fn inject_metadata(source: &str, meta: ordiola_core::TometMetadata) -> String {
+    ordiola_core::inject_tomet_metadata(source, &meta)
 }
 
 #[tauri::command]
-fn extract_config(source: &str) -> telaion_core::TometConfig {
-    telaion_core::extract_tomet_config(source)
+fn extract_config(source: &str) -> ordiola_core::TometConfig {
+    ordiola_core::extract_tomet_config(source)
 }
 
 #[tauri::command]
@@ -200,13 +200,13 @@ fn create_file(
     state: State<'_, AppState>,
 ) -> Result<FileEntry, String> {
     let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
-    telaion_core::create_file(&vault_root, Path::new(path), content).map_err(|e| e.to_string())
+    ordiola_core::create_file(&vault_root, Path::new(path), content).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn create_directory(path: &str, state: State<'_, AppState>) -> Result<FileEntry, String> {
     let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
-    telaion_core::create_directory(&vault_root, Path::new(path)).map_err(|e| e.to_string())
+    ordiola_core::create_directory(&vault_root, Path::new(path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -216,14 +216,14 @@ fn rename_entry(
     state: State<'_, AppState>,
 ) -> Result<FileEntry, String> {
     let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
-    telaion_core::rename_entry(&vault_root, Path::new(old_path), new_name)
+    ordiola_core::rename_entry(&vault_root, Path::new(old_path), new_name)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn delete_entry(path: &str, state: State<'_, AppState>) -> Result<(), String> {
     let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
-    telaion_core::delete_entry(&vault_root, Path::new(path)).map_err(|e| e.to_string())
+    ordiola_core::delete_entry(&vault_root, Path::new(path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -233,7 +233,7 @@ fn move_entry(
     state: State<'_, AppState>,
 ) -> Result<FileEntry, String> {
     let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
-    telaion_core::move_entry(&vault_root, Path::new(source_path), Path::new(dest_dir))
+    ordiola_core::move_entry(&vault_root, Path::new(source_path), Path::new(dest_dir))
         .map_err(|e| e.to_string())
 }
 
@@ -254,7 +254,7 @@ fn write_tomet_document(
 
 fn resolve_document_path(path: &str, state: &State<'_, AppState>) -> Result<PathBuf, String> {
     let current = state.current_vault.lock().map_err(|e| e.to_string())?;
-    telaion_core::resolve_in_vault(&current, Path::new(path)).map_err(|e| e.to_string())
+    ordiola_core::resolve_in_vault(&current, Path::new(path)).map_err(|e| e.to_string())
 }
 
 fn restart_watcher(app_handle: &tauri::AppHandle, vault_path: &Path, state: &AppState) {
@@ -331,7 +331,7 @@ pub fn run_with_vault(initial_vault: Option<PathBuf>) {
             if let Some(window) = app.get_webview_window("main")
                 && let Ok(url) = window.url()
             {
-                eprintln!(">>> TELAION WEBVIEW URL: {}", url);
+                eprintln!(">>> ORDIOLA WEBVIEW URL: {}", url);
             }
             Ok(())
         })
