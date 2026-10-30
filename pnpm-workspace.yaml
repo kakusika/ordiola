@@ -2,5 +2,7 @@ packages:
   - "apps/*"
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - '@telaion/ui@0.1.1'
 onlyBuiltDependencies:
   - esbuild

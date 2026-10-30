@@ -4,6 +4,8 @@
   import StarterKit from "@tiptap/starter-kit";
   import FileTreeNode from "$lib/FileTreeNode.svelte";
   import CodeEditor from "$lib/CodeEditor.svelte";
+  import ConfirmDelete from "$lib/ConfirmDelete.svelte";
+  import ConfirmUnsaved from "$lib/ConfirmUnsaved.svelte";
   import { Callout } from "$lib/calloutExtension";
   import type {
     FileEntry,
@@ -1885,100 +1887,21 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     </div>
   {/if}
 
-  <!-- Delete Confirmation Modal -->
   {#if deleteConfirmModal && deleteConfirmModal.visible}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
-      onclick={() => (deleteConfirmModal = null)}
-    >
-      <div
-        class="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl p-5 max-w-sm w-full text-xs space-y-3"
-        onclick={(e) => e.stopPropagation()}
-      >
-        <div class="flex items-start gap-3">
-          <div class="p-2 rounded-lg bg-red-950/60 border border-red-800/60 text-red-400 text-base shrink-0">
-            ⚠️
-          </div>
-          <div class="space-y-1 min-w-0">
-            <h3 class="text-sm font-semibold text-stone-100">
-              {deleteConfirmModal.entry.is_dir ? "フォルダの削除" : "ファイルの削除"}
-            </h3>
-            <p class="text-stone-300 break-all leading-relaxed">
-              「<span class="font-mono font-semibold text-stone-100">{deleteConfirmModal.entry.name}</span>」を削除してもよろしいですか？
-            </p>
-            {#if deleteConfirmModal.entry.is_dir}
-              <p class="text-amber-400 text-[11px] pt-1 leading-relaxed">
-                ※ フォルダ内のすべてのファイルおよびサブフォルダも完全に削除されます。
-              </p>
-            {/if}
-          </div>
-        </div>
-
-        <div class="flex justify-end gap-2 pt-2 border-t border-stone-800">
-          <button
-            class="px-3 py-1.5 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-stone-100 transition cursor-pointer font-medium"
-            onclick={() => (deleteConfirmModal = null)}
-          >
-            キャンセル
-          </button>
-          <button
-            class="px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-500 text-white font-medium transition cursor-pointer shadow-sm"
-            onclick={executeDelete}
-          >
-            削除
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDelete
+      entry={deleteConfirmModal.entry}
+      onConfirm={executeDelete}
+      onCancel={() => (deleteConfirmModal = null)}
+    />
   {/if}
-  <!-- Unsaved Changes on Tab Close Modal -->
-  {#if closeConfirmTab}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
-      onclick={() => (closeConfirmTab = null)}
-    >
-      <div
-        class="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl p-5 max-w-sm w-full text-xs space-y-3"
-        onclick={(e) => e.stopPropagation()}
-      >
-        <div class="flex items-start gap-3">
-          <div class="p-2 rounded-lg bg-amber-950/60 border border-amber-800/60 text-amber-400 text-base shrink-0">
-            ⚠️
-          </div>
-          <div class="space-y-1 min-w-0">
-            <h3 class="text-sm font-semibold text-stone-100">変更が保存されていません</h3>
-            <p class="text-stone-300 break-all leading-relaxed">
-              「<span class="font-mono font-semibold text-stone-100">{closeConfirmTab.title}</span>」への変更を保存しますか？
-            </p>
-          </div>
-        </div>
 
-        <div class="flex justify-end gap-2 pt-2 border-t border-stone-800">
-          <button
-            class="px-3 py-1.5 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-stone-100 transition cursor-pointer font-medium"
-            onclick={() => (closeConfirmTab = null)}
-          >
-            キャンセル
-          </button>
-          <button
-            class="px-3 py-1.5 rounded-md bg-stone-800 hover:bg-stone-700 text-amber-300 hover:text-amber-200 transition cursor-pointer font-medium"
-            onclick={() => executeCloseTab(closeConfirmTab!)}
-          >
-            保存しない
-          </button>
-          <button
-            class="px-3 py-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white font-medium transition cursor-pointer shadow-sm"
-            onclick={() => saveAndCloseTab(closeConfirmTab!)}
-          >
-            保存する
-          </button>
-        </div>
-      </div>
-    </div>
+  {#if closeConfirmTab}
+    <ConfirmUnsaved
+      title={closeConfirmTab.title}
+      onSave={() => saveAndCloseTab(closeConfirmTab!)}
+      onDiscard={() => executeCloseTab(closeConfirmTab!)}
+      onCancel={() => (closeConfirmTab = null)}
+    />
   {/if}
 
   <!-- Quick Open / Fuzzy Finder Modal -->

@@ -44,6 +44,9 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^3.0.0-alpha.3
         version: 3.0.0-alpha.3
+      '@telaion/ui':
+        specifier: ^0.1.1
+        version: 0.1.1(svelte@5.57.2)
       '@tiptap/core':
         specifier: ^2.11.5
         version: 2.27.3(@tiptap/pm@2.27.3)
@@ -719,6 +722,11 @@ packages:
 
   '@tauri-apps/plugin-opener@3.0.0-alpha.3':
     resolution: {integrity: sha512-UnmgVn/8TZmXKf9s6dhX8jvSKsb4mVeefSJ3aL9NxeUwXCvaYRVCDU7hTqmbTAwwxKRmIqZ6h0LeT+5/e4zBAg==}
+
+  '@telaion/ui@0.1.1':
+    resolution: {integrity: sha512-TplqH1EKIXxP9Gv1GdFdg1idQqZDP1K+oEtKTM+F8ZEUNp3Y3W1uuf1r3bJUYHheImqKfAtD69sqrtCa9Y+Iwg==}
+    peerDependencies:
+      svelte: ^5.0.0
 
   '@tiptap/core@2.27.3':
     resolution: {integrity: sha512-a5LfRbLpfaGI3hbL/LPHUYHI0I+FQHdSHsy8L4YnVIuu3hXcm3QZgkWbpEGf8hCz8krk6zEiu0+iFOjTySU2FA==}
@@ -1852,6 +1860,10 @@ snapshots:
   '@tauri-apps/plugin-opener@3.0.0-alpha.3':
     dependencies:
       '@tauri-apps/api': 3.0.0-alpha.3
+
+  '@telaion/ui@0.1.1(svelte@5.57.2)':
+    dependencies:
+      svelte: 5.57.2
 
   '@tiptap/core@2.27.3(@tiptap/pm@2.27.3)':
     dependencies:
