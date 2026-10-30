@@ -29,6 +29,3 @@
 "LICENSE-APACHE": {
   source: { upstream: commonfiles, path: "LICENSE-APACHE" }
 }
-"LICENSE-MIT": {
-  source: { upstream: commonfiles, path: "LICENSE-MIT" }
-}

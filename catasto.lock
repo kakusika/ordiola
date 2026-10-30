@@ -37,15 +37,6 @@
       },
       "commit": "4d2293d73bc91a742ba57dad7cb4c652726af836"
     },
-    "LICENSE-MIT": {
-      "sha256": "24d88f36f2620d2b18d70bc2136e103b1f9910a63a4614d94404577b2a41f5a0",
-      "source": {
-        "git": "https://github.com/tomet-lang/commonfiles.git",
-        "rev": "main",
-        "path": "base/LICENSE-MIT"
-      },
-      "commit": "4d2293d73bc91a742ba57dad7cb4c652726af836"
-    },
     "nix/formatter.nix": {
       "sha256": "520fd59fc3243a1220b18ba0ce3b710de7c91a46a7d71be0e8f28d9bac55e093",
       "source": {
