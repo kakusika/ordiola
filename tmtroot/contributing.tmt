@@ -20,6 +20,22 @@ ${macro.generated_by(self.path)}
 -| Always edit the source `.tmt` files under @dir(tmtroot/).
 -| Run `just docs` (or `tomet export .`) to regenerate Markdown files, and verify with `just docs-check`.
 
+==[ Project Philosophy ]
+
+Ordiola is a tool shaped by personal taste, not a product that aims to grow.
+
+===[ Non-goals ]
+
+- A marketplace or any other ecosystem for sharing plugins and themes.
+- Hosted services such as a sync service. Git synchronization is provided by the Tomet ecosystem, and Ordiola only uses it.
+- Migration tools or special handling for other applications' formats. Markdown files are treated like any other text file.
+- Promotion, onboarding funnels, or comparisons that position Ordiola against other applications.
+
+===[ Stability ]
+
+Extension APIs and file formats may change without notice.
+If you need a stable plugin API, Ordiola is not the right tool.
+
 ==[ Commit Convention ]
 
 All commits must follow the Conventional Commits format: `type(scope): description`.
