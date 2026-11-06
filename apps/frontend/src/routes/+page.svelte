@@ -4,10 +4,14 @@
   import StarterKit from "@tiptap/starter-kit";
   import FileTreeNode from "$lib/FileTreeNode.svelte";
   import { CodeEditor } from "@telaion/editor";
+  import { SplitPane } from "@telaion/shell";
+  import { Kanban, TreeExplorer } from "@telaion/views";
+  import type { KanbanColumnData, TreeNode } from "@telaion/views";
   import { sourceExtras, sourceLanguage } from "$lib/sourceEditor";
   import ConfirmDelete from "$lib/ConfirmDelete.svelte";
   import ConfirmUnsaved from "$lib/ConfirmUnsaved.svelte";
   import { Callout } from "$lib/calloutExtension";
+  import { TypstSplitView } from "@ordiola/ext-typst";
   import type {
     FileEntry,
     VaultEntry,
@@ -34,9 +38,10 @@
   let activeFile = $derived(activeTab ? activeTab.title : "");
   let activePath = $derived(activeTab ? activeTab.path : "");
   let isSaved = $derived(activeTab ? !activeTab.isModified : true);
-  let editMode = $derived<"source" | "hybrid" | "full">(activeTab ? activeTab.editMode : "source");
+  let editMode = $derived<"source" | "hybrid" | "full" | "kanban">(activeTab ? activeTab.editMode : "source");
   let rawTextContent = $derived(activeTab ? activeTab.rawContent : "");
   let isTmtFile = $derived(activeTab ? activeTab.isTmt : false);
+  let isTypstFile = $derived(activeTab ? activeTab.isTypst : false);
 
   // Vault State
   let vaultName = $state<string>("ordiola");
@@ -48,8 +53,54 @@
   // File Tree Explorer State
   let rootEntries = $state<FileEntry[]>([]);
   let expandedPaths = $state<Set<string>>(new Set());
+  let selectedTreeId = $state<string | null>(null);
   let isRefreshing = $state<boolean>(false);
   let unlistenWatcher: (() => void) | null = null;
+
+  function toTreeNodes(entries: FileEntry[]): TreeNode[] {
+    return entries.map((e) => {
+      const id = e.relative_path || e.path;
+      return {
+        id,
+        label: e.name,
+        isFolder: e.is_dir,
+        children: e.children ? toTreeNodes(e.children) : (e.is_dir ? [] : undefined),
+        data: e,
+      };
+    });
+  }
+  let treeNodes = $derived(toTreeNodes(rootEntries));
+
+  $effect(() => {
+    if (activePath) {
+      selectedTreeId = activePath;
+    }
+  });
+
+  let kanbanColumns = $state<KanbanColumnData[]>([
+    {
+      id: "todo",
+      title: "ToDo",
+      items: [
+        { id: "task-1", title: "設計仕様の策定", description: "Telaion トークンモデルの適用", badge: "仕様", badgeTone: "neutral" },
+        { id: "task-2", title: "コンポーネント分離", description: "primitives, shell, views の分割", badge: "設計", badgeTone: "accent" },
+      ],
+    },
+    {
+      id: "inprogress",
+      title: "進行中",
+      items: [
+        { id: "task-3", title: "Ordiola 統合テスト", description: "SplitPane と TreeExplorer の導入検証", badge: "検証", badgeTone: "warn" },
+      ],
+    },
+    {
+      id: "done",
+      title: "完了",
+      items: [
+        { id: "task-4", title: "@telaion/theme 0.1.5 公開", description: "npm レジストリへ 0.1.5 をパブリッシュ", badge: "リリース", badgeTone: "ok" },
+      ],
+    },
+  ]);
 
   let selectedEntry = $state<FileEntry | null>(null);
   let selectedPath = $derived<string | null>(
@@ -711,6 +762,8 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       if (action.type === "new-file") {
         const initialContent = targetRelative.endsWith(".tmt")
           ? `=[ ${value.replace(/\.tmt$/, "")} ]=\n\n`
+          : targetRelative.endsWith(".typ")
+          ? `= ${value.replace(/\.typ$/, "")}\n\nWrite your Typst document here.\n`
           : "";
         await invoke<FileEntry>("create_file", {
           path: targetRelative,
@@ -900,6 +953,7 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       title,
       isModified: false,
       isTmt: filePath.endsWith(".tmt"),
+      isTypst: filePath.endsWith(".typ"),
       rawContent: text,
       pmDoc,
       editMode: "source",
@@ -1133,11 +1187,11 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     }
   }
 
-  async function toggleMode(mode: "source" | "hybrid" | "full") {
+  async function toggleMode(mode: "source" | "hybrid" | "full" | "kanban") {
     if (!activeTab || mode === activeTab.editMode) return;
 
-    if (!activeTab.isTmt && mode !== "source") {
-      statusMessage = "Tomet ファイル (.tmt) 以外はソース編集モードのみ対応しています";
+    if (!activeTab.isTmt && mode !== "source" && mode !== "kanban") {
+      statusMessage = "Tomet ファイル (.tmt) 以外はソースまたはカンバン編集モードのみ対応しています";
       return;
     }
 
@@ -1176,9 +1230,11 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
   }
 </script>
 
-<div class="flex h-screen w-screen overflow-hidden bg-stone-950 text-stone-200 select-none">
-  <!-- Left Sidebar: Workspace Vault & Lazy Tree Explorer -->
-  <aside class="w-68 border-r border-stone-800 bg-stone-900/60 flex flex-col shrink-0 relative">
+<div class="flex h-screen w-screen overflow-hidden bg-tln-canvas text-tln-fg select-none">
+  <SplitPane direction="horizontal" ratio={0.22} min={0.15} max={0.45}>
+    {#snippet primary()}
+      <!-- Left Sidebar: Workspace Vault & Lazy Tree Explorer -->
+      <aside class="h-full w-full border-r border-tln-border bg-tln-content flex flex-col relative overflow-hidden">
     <!-- Vault Header & Switcher Trigger -->
     <div class="p-3 border-b border-stone-800 relative">
       <div class="flex items-center gap-1.5 relative group/vault">
@@ -1386,45 +1442,53 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       {/if}
 
       {#if rootEntries.length === 0 && !isRootCreating}
-        <div class="text-stone-500 text-xs p-3 text-center italic font-mono">
+        <div class="text-tln-fg-muted text-xs p-3 text-center italic font-mono">
           ファイルが見つかりません
         </div>
       {:else}
-        {#each rootEntries as entry (entry.path || entry.relative_path)}
-          <FileTreeNode
-            {entry}
-            {activePath}
-            {selectedPath}
-            depth={0}
-            {inlineAction}
-            onSelectFile={handleFileSelect}
-            onSelectEntry={(ent) => (selectedEntry = ent)}
-            onToggleDir={toggleDirectory}
-            onContextMenu={handleContextMenu}
-            onCommitInlineAction={commitInlineAction}
-            onCancelInlineAction={cancelInlineAction}
-            onMoveEntry={handleMoveEntry}
-          />
-        {/each}
+        <TreeExplorer
+          nodes={treeNodes}
+          bind:selectedId={selectedTreeId}
+          bind:expandedIds={expandedPaths}
+          onselect={(node) => {
+            if (node.data) {
+              const entry = node.data as FileEntry;
+              if (!entry.is_dir) {
+                handleFileSelect(entry);
+              } else {
+                selectedEntry = entry;
+              }
+            }
+          }}
+          ontoggle={(node, expanded) => {
+            if (node.data) {
+              const entry = node.data as FileEntry;
+              if (entry.is_dir) {
+                toggleDirectory(entry);
+              }
+            }
+          }}
+        />
       {/if}
     </div>
 
     <!-- Bottom Status / Diagnostics -->
-    <div class="p-3 border-t border-stone-800/80 bg-stone-950/40 text-[11px] text-stone-400 space-y-1.5">
+    <div class="p-3 border-t border-tln-border bg-tln-well text-[11px] text-tln-fg-muted space-y-1.5">
       <div class="flex items-center justify-between">
         <span>Backend:</span>
-        <span class="font-mono text-emerald-400">{isTauri ? "Tauri v3 IPC" : "Web (Vite)"}</span>
+        <span class="font-mono text-tln-ok">{isTauri ? "Tauri v3 IPC" : "Web (Vite)"}</span>
       </div>
       {#if statusMessage}
-        <div class="text-[10px] text-stone-400 truncate font-mono" title={statusMessage}>
+        <div class="text-[10px] text-tln-fg-muted truncate font-mono" title={statusMessage}>
           {statusMessage}
         </div>
       {/if}
     </div>
   </aside>
-
+  {/snippet}
+  {#snippet secondary()}
   <!-- Main Workspace Canvas -->
-  <main class="flex-1 flex flex-col h-full overflow-hidden bg-stone-900/20">
+  <main class="h-full w-full flex flex-col overflow-hidden bg-tln-canvas">
     <!-- Top Bar: Tab Strip, Mode Switcher, Actions -->
     <header class="h-11 border-b border-stone-800/80 px-2 flex items-center justify-between shrink-0 bg-stone-900/60 backdrop-blur-sm select-none gap-2 min-w-0">
       <!-- Tabs Strip Area -->
@@ -1442,7 +1506,7 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
             onauxclick={(e) => { if (e.button === 1) requestCloseTab(tab); }}
             title={tab.path}
           >
-            <span class="text-xs shrink-0">{tab.isTmt ? "📜" : "📄"}</span>
+            <span class="text-xs shrink-0">{tab.isTmt ? "📜" : tab.isTypst ? "📐" : "📄"}</span>
             <span class="truncate max-w-40 {tab.id === activeTabId ? 'font-medium' : ''}">{tab.title}</span>
 
             {#if tab.isModified}
@@ -1504,6 +1568,15 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
                 <span class="text-[11px]">フルブロック</span>
               </button>
             {/if}
+
+            <button
+              class="px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer {editMode === 'kanban' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
+              onclick={() => toggleMode('kanban')}
+              title="カンバンボード表示"
+            >
+              <span>📋</span>
+              <span class="text-[11px]">カンバン</span>
+            </button>
           </div>
 
           <!-- Save Button -->
@@ -1730,8 +1803,21 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       {/if}
     {/if}
 
-    <!-- CodeMirror 6 Source Text Editor (Active when editMode === 'source') -->
-    <div class="flex-1 overflow-hidden relative" class:hidden={editMode !== 'source'}>
+    {#if isTypstFile}
+      <!-- Typst 2-Pane Editor + Live SVG Preview -->
+      <div class="flex-1 overflow-hidden relative">
+        <TypstSplitView
+          content={rawTextContent}
+          path={activePath}
+          language={sourceLanguage(activePath)}
+          extensions={sourceExtras}
+          onChange={handleSourceChange}
+          onSave={saveCurrentDocument}
+        />
+      </div>
+    {:else}
+      <!-- CodeMirror 6 Source Text Editor (Active when editMode === 'source') -->
+      <div class="flex-1 overflow-hidden relative" class:hidden={editMode !== 'source'}>
       <div class="h-full w-full overflow-hidden bg-stone-950 select-text">
         <CodeEditor
           label="ソース"
@@ -1744,10 +1830,10 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       </div>
     </div>
 
-    <!-- Tiptap WYSIWYG / Hybrid Editor (Active when editMode !== 'source') -->
+    <!-- Tiptap WYSIWYG / Hybrid Editor (Active when editMode === 'hybrid' || editMode === 'full') -->
     <div
       class="flex-1 overflow-y-auto px-10 py-8 {editMode === 'hybrid' ? 'mode-hybrid' : 'mode-full'}"
-      class:hidden={editMode === 'source'}
+      class:hidden={editMode !== 'hybrid' && editMode !== 'full'}
     >
       <div class="max-w-3xl mx-auto">
 
@@ -1765,8 +1851,34 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
         <div bind:this={editorElement} class="tiptap-editor cursor-text selection:bg-stone-800 select-text"></div>
       </div>
     </div>
+
+    <!-- Kanban Board View (Active when editMode === 'kanban') -->
+    {#if editMode === 'kanban'}
+      <div class="flex-1 overflow-auto p-6 bg-tln-canvas">
+        <Kanban
+          bind:columns={kanbanColumns}
+          onaddcard={(colId) => {
+            const col = kanbanColumns.find((c) => c.id === colId);
+            if (col) {
+              const num = col.items.length + 1;
+              col.items.push({
+                id: `card-${Date.now()}`,
+                title: `新規タスク ${num}`,
+                description: `${activeFile} のタスク項目`,
+                badge: col.title,
+                badgeTone: colId === "done" ? "ok" : colId === "inprogress" ? "accent" : "neutral",
+              });
+              kanbanColumns = [...kanbanColumns];
+            }
+          }}
+        />
+      </div>
+    {/if}
+    {/if}
     {/if}
   </main>
+  {/snippet}
+  </SplitPane>
 
   <!-- Context Menu Overlay -->
   {#if contextMenu && contextMenu.visible}

@@ -35,6 +35,9 @@ importers:
       '@lucide/svelte':
         specifier: ^1.23.0
         version: 1.61.0(svelte@5.57.2)
+      '@ordiola/ext-typst':
+        specifier: workspace:*
+        version: link:../../extensions/typst
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.3.3(vite@6.4.5(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0))
@@ -45,11 +48,20 @@ importers:
         specifier: ^3.0.0-alpha.3
         version: 3.0.0-alpha.3
       '@telaion/editor':
-        specifier: ^0.1.3
-        version: 0.1.3(svelte@5.57.2)
-      '@telaion/ui':
-        specifier: ^0.1.3
-        version: 0.1.3(svelte@5.57.2)
+        specifier: ^0.1.5
+        version: 0.1.5(svelte@5.57.2)
+      '@telaion/primitives':
+        specifier: ^0.1.5
+        version: 0.1.5(svelte@5.57.2)
+      '@telaion/shell':
+        specifier: ^0.1.5
+        version: 0.1.5(svelte@5.57.2)
+      '@telaion/theme':
+        specifier: ^0.1.5
+        version: 0.1.5
+      '@telaion/views':
+        specifier: ^0.1.5
+        version: 0.1.5(svelte@5.57.2)
       '@tiptap/core':
         specifier: ^2.11.5
         version: 2.27.3(@tiptap/pm@2.27.3)
@@ -93,6 +105,27 @@ importers:
       wireit:
         specifier: ^0.15.0
         version: 0.15.0
+
+  extensions/typst:
+    dependencies:
+      '@codemirror/state':
+        specifier: ^6.7.6
+        version: 6.7.6
+      '@lucide/svelte':
+        specifier: ^1.23.0
+        version: 1.61.0(svelte@5.57.2)
+      '@tauri-apps/api':
+        specifier: ^3.0.0-alpha.3
+        version: 3.0.0-alpha.3
+      '@telaion/editor':
+        specifier: ^0.1.5
+        version: 0.1.5(svelte@5.57.2)
+      '@telaion/shell':
+        specifier: ^0.1.5
+        version: 0.1.5(svelte@5.57.2)
+      svelte:
+        specifier: ^5.0.0
+        version: 5.57.2
 
 packages:
 
@@ -720,13 +753,26 @@ packages:
   '@tauri-apps/plugin-opener@3.0.0-alpha.3':
     resolution: {integrity: sha512-UnmgVn/8TZmXKf9s6dhX8jvSKsb4mVeefSJ3aL9NxeUwXCvaYRVCDU7hTqmbTAwwxKRmIqZ6h0LeT+5/e4zBAg==}
 
-  '@telaion/editor@0.1.3':
-    resolution: {integrity: sha512-ep22Viahy45PBuUuRe/aABDKLZcIIADtvzobSVt8IBFbld24VwsUSliFn4tpqmlHYynIUtXw/AcGsZeMQfdofg==}
+  '@telaion/editor@0.1.5':
+    resolution: {integrity: sha512-v9BZEpkXrmF4NhUD83txEWL8USSm4/09M14dXV/KIPe8Dv7mx5wbuRYN9PGpKtQXGE96H2BD9XUF/LJk9nJFyA==}
     peerDependencies:
       svelte: ^5.0.0
 
-  '@telaion/ui@0.1.3':
-    resolution: {integrity: sha512-qdmPaxA3A5QPRx5+f7t0GOftlv+JR6kuZ7eRaoNSR7tV92uuT0BMJc+0/wV5ugp80MbzWzZSQSvz63041ICngw==}
+  '@telaion/primitives@0.1.5':
+    resolution: {integrity: sha512-z78PUWfxe1Hfp2IRPMe6jV/oVfEFCuNbEdnmgoTktS2US8N2f01YSvq+GCndOb8DpB/cxjNx0mYB8gU2Xv83zg==}
+    peerDependencies:
+      svelte: ^5.0.0
+
+  '@telaion/shell@0.1.5':
+    resolution: {integrity: sha512-VAu/rZULz3oCqRAJkCXa6rPFLTA+TveFngeOSwfY3px+UEsGKFwDHOru1x+BXHl8S/wrPIuv2pHjfHpIY1RckQ==}
+    peerDependencies:
+      svelte: ^5.0.0
+
+  '@telaion/theme@0.1.5':
+    resolution: {integrity: sha512-SLcatxFUIgMqcqaHxQ/eytbIsc6Rj4DYi6BbS5hefIhLnyWtjVe99I9xx694+Iv+8oV/69jhzrgWK8gw6drY9w==}
+
+  '@telaion/views@0.1.5':
+    resolution: {integrity: sha512-iZcH7rnF/91lj+A1Xi1miRjfEt9jmjcM5A9F+IeywAxExsl1yZnRXzMQkmhY/+N8LqhWANxti59L9JRMZfkhgQ==}
     peerDependencies:
       svelte: ^5.0.0
 
@@ -1853,18 +1899,34 @@ snapshots:
     dependencies:
       '@tauri-apps/api': 3.0.0-alpha.3
 
-  '@telaion/editor@0.1.3(svelte@5.57.2)':
+  '@telaion/editor@0.1.5(svelte@5.57.2)':
     dependencies:
       '@codemirror/commands': 6.11.1
       '@codemirror/language': 6.13.1
       '@codemirror/state': 6.7.6
       '@codemirror/view': 6.43.15
       '@lezer/highlight': 1.2.5
-      '@telaion/ui': 0.1.3(svelte@5.57.2)
+      '@telaion/primitives': 0.1.5(svelte@5.57.2)
+      '@telaion/theme': 0.1.5
       svelte: 5.57.2
 
-  '@telaion/ui@0.1.3(svelte@5.57.2)':
+  '@telaion/primitives@0.1.5(svelte@5.57.2)':
     dependencies:
+      '@telaion/theme': 0.1.5
+      svelte: 5.57.2
+
+  '@telaion/shell@0.1.5(svelte@5.57.2)':
+    dependencies:
+      '@telaion/primitives': 0.1.5(svelte@5.57.2)
+      '@telaion/theme': 0.1.5
+      svelte: 5.57.2
+
+  '@telaion/theme@0.1.5': {}
+
+  '@telaion/views@0.1.5(svelte@5.57.2)':
+    dependencies:
+      '@telaion/primitives': 0.1.5(svelte@5.57.2)
+      '@telaion/theme': 0.1.5
       svelte: 5.57.2
 
   '@tiptap/core@2.27.3(@tiptap/pm@2.27.3)':

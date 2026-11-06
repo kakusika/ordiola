@@ -1,12 +1,14 @@
 @import "tailwindcss";
-@import "@telaion/ui/tokens.css";
+@import "@telaion/theme/tokens.css";
+@import "@telaion/theme/tailwind.css";
 
 html, body {
   height: 100%;
   margin: 0;
   padding: 0;
-  background-color: #0c0a09; /* stone-950 */
-  color: #f5f5f4; /* stone-100 */
+  background-color: var(--tln-canvas-bg);
+  color: var(--tln-fg);
+  font-family: var(--tln-font);
 }
 
 /* ProseMirror / Tiptap Typography & Structure */

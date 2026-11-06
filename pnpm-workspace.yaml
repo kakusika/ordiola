@@ -1,9 +1,13 @@
 packages:
   - "apps/*"
+  - "extensions/*"
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - '@telaion/editor@0.1.3'
-  - '@telaion/ui@0.1.3'
+  - '@telaion/editor@0.1.5'
+  - '@telaion/primitives@0.1.5'
+  - '@telaion/shell@0.1.5'
+  - '@telaion/theme@0.1.5'
+  - '@telaion/views@0.1.5'
 onlyBuiltDependencies:
   - esbuild

@@ -46,9 +46,10 @@ export interface EditorTab {
   title: string;
   isModified: boolean;
   isTmt: boolean;
+  isTypst: boolean;
   rawContent: string;
   pmDoc?: any;
-  editMode: "source" | "hybrid" | "full";
+  editMode: "source" | "hybrid" | "full" | "kanban";
 }
 
 

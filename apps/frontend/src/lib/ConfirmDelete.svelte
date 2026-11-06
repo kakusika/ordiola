@@ -1,7 +1,7 @@
 <script lang="ts">
-  // The delete confirmation, built on @telaion/ui.
-  import { Alert, Button, Icon, Modal } from "@telaion/ui";
-  import { TriangleAlert } from "@telaion/ui/icons";
+  // The delete confirmation, built on @telaion/primitives.
+  import { Alert, Button, Icon, Modal } from "@telaion/primitives";
+  import { TriangleAlert } from "@telaion/primitives/icons";
 
   let {
     entry,

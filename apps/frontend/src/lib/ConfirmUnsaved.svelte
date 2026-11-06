@@ -1,7 +1,7 @@
 <script lang="ts">
-  // The "unsaved changes on tab close" dialog, built on @telaion/ui.
-  import { Button, Icon, Modal } from "@telaion/ui";
-  import { TriangleAlert } from "@telaion/ui/icons";
+  // The "unsaved changes on tab close" dialog, built on @telaion/primitives.
+  import { Button, Icon, Modal } from "@telaion/primitives";
+  import { TriangleAlert } from "@telaion/primitives/icons";
 
   let {
     title,
