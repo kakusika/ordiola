@@ -252,6 +252,38 @@ fn write_tomet_document(
         .map_err(|e| format!("ファイル保存失敗 ({}): {e}", file_path.display()))
 }
 
+#[tauri::command]
+fn compile_typst(
+    source: String,
+    relative_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<ordiola_ext_typst::TypstCompileOutput, String> {
+    let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
+    Ok(ordiola_ext_typst::compile_source(
+        &source,
+        relative_path.as_deref(),
+        Some(&vault_root),
+    ))
+}
+
+#[tauri::command]
+fn export_typst_pdf(
+    source: String,
+    relative_path: Option<String>,
+    output_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
+    let out = ordiola_core::resolve_in_vault(&vault_root, Path::new(&output_path))
+        .unwrap_or_else(|_| PathBuf::from(&output_path));
+    ordiola_ext_typst::export_pdf(
+        &source,
+        relative_path.as_deref(),
+        Some(&vault_root),
+        &out,
+    )
+}
+
 fn resolve_document_path(path: &str, state: &State<'_, AppState>) -> Result<PathBuf, String> {
     let current = state.current_vault.lock().map_err(|e| e.to_string())?;
     ordiola_core::resolve_in_vault(&current, Path::new(path)).map_err(|e| e.to_string())
@@ -355,7 +387,9 @@ pub fn run_with_vault(initial_vault: Option<PathBuf>) {
             parse_tomet_string,
             serialize_prosemirror_doc,
             read_tomet_document,
-            write_tomet_document
+            write_tomet_document,
+            compile_typst,
+            export_typst_pdf
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
