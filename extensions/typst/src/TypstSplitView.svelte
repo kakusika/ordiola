@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { Alert } from "@telaion/primitives";
   import { SplitPane } from "@telaion/shell";
   import { CodeEditor } from "@telaion/editor";
   import TypstPreview from "./TypstPreview.svelte";
@@ -28,6 +29,8 @@
   let diagnostics = $state<TypstDiagnostic[]>([]);
   let isCompiling = $state<boolean>(false);
   let debounceTimer: any = null;
+  // The outcome of the last PDF export, until it is dismissed.
+  let notice = $state<{ tone: "ok" | "danger"; text: string } | null>(null);
 
   async function triggerCompile(text: string) {
     isCompiling = true;
@@ -67,9 +70,9 @@
     try {
       const defaultOut = path.replace(/\.typ$/, ".pdf");
       await exportTypstPdf(content, path, defaultOut);
-      alert(`PDF を書き出しました: ${defaultOut}`);
+      notice = { tone: "ok", text: `PDF を書き出しました: ${defaultOut}` };
     } catch (e: any) {
-      alert(`PDF 書き出しエラー: ${e?.message || e}`);
+      notice = { tone: "danger", text: `PDF 書き出しエラー: ${e?.message || e}` };
     }
   }
 
@@ -91,29 +94,38 @@
   });
 </script>
 
-<div class="h-full w-full overflow-hidden bg-stone-950">
-  <SplitPane direction="horizontal" ratio={0.5} min={0.2} max={0.8}>
-    {#snippet primary()}
-      <div class="h-full w-full overflow-hidden bg-stone-950 select-text">
-        <CodeEditor
-          label="Typst"
-          {content}
-          {language}
-          {extensions}
-          onChange={handleEditorChange}
-          {onSave}
-        />
-      </div>
-    {/snippet}
-    {#snippet secondary()}
-      <div class="h-full w-full overflow-hidden border-l border-stone-800">
-        <TypstPreview
-          {pages}
-          {diagnostics}
-          {isCompiling}
-          onExportPdf={handleExportPdf}
-        />
-      </div>
-    {/snippet}
-  </SplitPane>
+<div class="h-full w-full overflow-hidden flex flex-col bg-tln-canvas">
+  {#if notice}
+    <div class="p-2 shrink-0">
+      <Alert tone={notice.tone} onDismiss={() => (notice = null)}>{notice.text}</Alert>
+    </div>
+  {/if}
+  <div class="flex-1 min-h-0">
+    <SplitPane direction="horizontal" ratio={0.5} min={0.2} max={0.8}>
+      {#snippet primary()}
+        <!-- The source is typed into: the pane is a well, and the editor is bare text on it. -->
+        <div class="h-full w-full overflow-hidden bg-tln-well select-text">
+          <CodeEditor
+            variant="bare"
+            label="Typst"
+            {content}
+            {language}
+            {extensions}
+            onChange={handleEditorChange}
+            {onSave}
+          />
+        </div>
+      {/snippet}
+      {#snippet secondary()}
+        <div class="h-full w-full overflow-hidden">
+          <TypstPreview
+            {pages}
+            {diagnostics}
+            {isCompiling}
+            onExportPdf={handleExportPdf}
+          />
+        </div>
+      {/snippet}
+    </SplitPane>
+  </div>
 </div>

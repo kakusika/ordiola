@@ -1,4 +1,15 @@
 <script lang="ts">
+  import { Alert, Badge, Button, EmptyState, IconButton, Spinner, Toolbar } from "@telaion/primitives";
+  import {
+    ChevronDown,
+    ChevronUp,
+    FileDown,
+    FileText,
+    FileX,
+    MoveHorizontal,
+    ZoomIn,
+    ZoomOut,
+  } from "@telaion/primitives/icons";
   import type { TypstDiagnostic } from "./types";
 
   interface Props {
@@ -17,6 +28,10 @@
     onExportPdf,
   }: Props = $props();
 
+  const ZOOM_MIN = 0.3;
+  const ZOOM_MAX = 3.0;
+  const ZOOM_STEP = 0.15;
+
   let zoom = $state<number>(1.0);
   let fitWidth = $state<boolean>(false);
   let isDiagnosticsOpen = $state<boolean>(true);
@@ -26,12 +41,12 @@
 
   function zoomIn() {
     fitWidth = false;
-    zoom = Math.min(3.0, +(zoom + 0.15).toFixed(2));
+    zoom = Math.min(ZOOM_MAX, +(zoom + ZOOM_STEP).toFixed(2));
   }
 
   function zoomOut() {
     fitWidth = false;
-    zoom = Math.max(0.3, +(zoom - 0.15).toFixed(2));
+    zoom = Math.max(ZOOM_MIN, +(zoom - ZOOM_STEP).toFixed(2));
   }
 
   function resetZoom() {
@@ -44,101 +59,88 @@
   }
 </script>
 
-<div class="h-full w-full flex flex-col bg-stone-900 overflow-hidden select-none">
-  <!-- Preview Control Header -->
-  <header class="h-9 px-3 border-b border-stone-800 bg-stone-950/80 flex items-center justify-between text-xs text-stone-300 shrink-0 backdrop-blur-xs gap-2">
-    <!-- Left: Status & Page count -->
-    <div class="flex items-center gap-2">
-      <span class="font-semibold text-stone-400 text-[11px] uppercase tracking-wider">Preview</span>
-      {#if isCompiling}
-        <span class="flex items-center gap-1 text-[11px] text-sky-400 animate-pulse">
-          <svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-          </svg>
-          コンパイル中...
-        </span>
-      {:else if pages.length > 0}
-        <span class="text-[11px] text-stone-400 font-mono">
-          {pages.length} ページ
-        </span>
-      {/if}
-    </div>
+<div class="typst-preview h-full w-full flex flex-col bg-tln-canvas text-tln-fg overflow-hidden select-none">
+  <!-- Preview controls -->
+  <div class="p-2 shrink-0">
+    <Toolbar label="Typst プレビュー">
+      <div class="flex items-center gap-2 text-tln-xs text-tln-fg-muted">
+        <span>Preview</span>
+        {#if isCompiling}
+          <Spinner label="コンパイル中..." />
+          <span>コンパイル中...</span>
+        {:else if pages.length > 0}
+          <Badge>{pages.length} ページ</Badge>
+        {/if}
+      </div>
 
-    <!-- Center: Zoom Controls -->
-    <div class="flex items-center gap-1 bg-stone-900 border border-stone-800 rounded px-1 py-0.5">
-      <button
-        class="w-5 h-5 flex items-center justify-center rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 cursor-pointer disabled:opacity-40"
-        onclick={zoomOut}
-        disabled={zoom <= 0.3}
-        title="縮小"
-      >
-        −
-      </button>
-
-      <button
-        class="px-1.5 text-[11px] font-mono text-stone-300 hover:text-white cursor-pointer"
-        onclick={resetZoom}
-        title="100%にリセット"
-      >
-        {Math.round(zoom * 100)}%
-      </button>
-
-      <button
-        class="w-5 h-5 flex items-center justify-center rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 cursor-pointer disabled:opacity-40"
-        onclick={zoomIn}
-        disabled={zoom >= 3.0}
-        title="拡大"
-      >
-        ＋
-      </button>
-
-      <div class="w-px h-3 bg-stone-800 mx-0.5"></div>
-
-      <button
-        class="px-1.5 py-0.5 rounded text-[10px] cursor-pointer transition font-mono {fitWidth ? 'bg-sky-500/20 text-sky-300 font-medium' : 'text-stone-400 hover:text-stone-200'}"
-        onclick={toggleFitWidth}
-        title="幅に合わせる"
-      >
-        幅合致
-      </button>
-    </div>
-
-    <!-- Right: Actions (Export PDF) -->
-    <div class="flex items-center gap-2">
-      {#if onExportPdf}
-        <button
-          class="flex items-center gap-1 px-2 py-0.5 rounded bg-sky-950/60 hover:bg-sky-900/80 text-sky-300 hover:text-sky-100 border border-sky-500/30 text-[11px] font-medium transition cursor-pointer shadow-sm"
-          onclick={onExportPdf}
-          title="PDFをエクスポート"
+      <div class="flex items-center gap-1 mx-auto">
+        <IconButton
+          icon={ZoomOut}
+          label="縮小"
+          size="sm"
+          onclick={zoomOut}
+          disabled={zoom <= ZOOM_MIN}
+        />
+        <Button variant="quiet" size="sm" onclick={resetZoom} title="100%にリセット">
+          {Math.round(zoom * 100)}%
+        </Button>
+        <IconButton
+          icon={ZoomIn}
+          label="拡大"
+          size="sm"
+          onclick={zoomIn}
+          disabled={zoom >= ZOOM_MAX}
+        />
+        <Button
+          variant={fitWidth ? "soft" : "quiet"}
+          size="sm"
+          icon={MoveHorizontal}
+          aria-pressed={fitWidth}
+          onclick={toggleFitWidth}
+          title="幅に合わせる"
         >
-          <span>📑</span>
-          <span>PDF 出力</span>
-        </button>
-      {/if}
-    </div>
-  </header>
+          幅合致
+        </Button>
+      </div>
 
-  <!-- Pages Canvas View Area -->
-  <div class="flex-1 overflow-auto p-6 flex flex-col items-center gap-6 bg-stone-900/90 relative">
+      {#if onExportPdf}
+        <Button size="sm" icon={FileDown} onclick={onExportPdf} title="PDFをエクスポート">
+          PDF 出力
+        </Button>
+      {/if}
+    </Toolbar>
+  </div>
+
+  <!-- Pages -->
+  <div class="flex-1 overflow-auto p-6 flex flex-col items-center gap-6 relative">
     {#if pages.length === 0 && !isCompiling}
-      <div class="m-auto text-center text-stone-500 text-xs py-12">
-        <div class="text-3xl mb-2">📄</div>
-        <p>プレビューできるページがありません</p>
-        <p class="text-[11px] text-stone-600 mt-1">Typst ソースコードを入力すると自動的にコンパイルされます</p>
+      <div class="m-auto">
+        {#if errorCount > 0}
+          <EmptyState
+            icon={FileX}
+            title="プレビューを表示できません"
+            description="ソースのエラーを直すと、自動的にコンパイルし直します"
+          />
+        {:else}
+          <EmptyState
+            icon={FileText}
+            title="プレビューできるページがありません"
+            description="Typst ソースコードを入力すると自動的にコンパイルされます"
+          />
+        {/if}
       </div>
     {:else}
       {#each pages as pageSvg, idx (idx)}
         <div class="flex flex-col items-center">
-          <!-- Page Paper Container -->
+          <!-- The page is a printed sheet: paper in both themes. The SVG from the compiler draws its own ink. -->
           <div
-            class="typst-page-container bg-white shadow-2xl rounded-xs overflow-hidden transition-all duration-75 ease-out select-text"
-            style="transform-origin: top center; {fitWidth ? 'width: 100%; max-width: 820px;' : `transform: scale(${zoom});`}"
+            class="typst-page-container bg-tln-paper shadow-tln-content rounded-tln overflow-hidden transition-tln select-text"
+            style="transform-origin: top center; {fitWidth ? 'width: 100%; max-width: calc(var(--tln-space) * 200);' : `transform: scale(${zoom});`}"
           >
             {@html pageSvg}
           </div>
 
-          <!-- Page Indicator Footer -->
-          <span class="text-[10px] font-mono text-stone-500 mt-2 select-none">
+          <span class="text-tln-xs text-tln-fg-muted mt-2 select-none">
             Page {idx + 1} / {pages.length}
           </span>
         </div>
@@ -146,45 +148,49 @@
     {/if}
   </div>
 
-  <!-- Diagnostics Bottom Banner (Errors & Warnings) -->
+  <!-- Diagnostics (errors and warnings) -->
   {#if diagnostics.length > 0}
-    <div class="border-t border-stone-800 bg-stone-950/95 flex flex-col text-xs shrink-0 max-h-48 overflow-hidden">
-      <!-- Diagnostics Header Toggle -->
-      <button
-        class="h-7 px-3 flex items-center justify-between text-stone-400 hover:text-stone-200 cursor-pointer bg-stone-900/50 border-b border-stone-800/60"
-        onclick={() => (isDiagnosticsOpen = !isDiagnosticsOpen)}
-      >
+    <div class="typst-diagnostics bg-tln-content flex flex-col shrink-0 max-h-48 overflow-hidden">
+      <div class="p-2 flex items-center justify-between gap-2 shrink-0">
         <div class="flex items-center gap-2">
           {#if errorCount > 0}
-            <span class="flex items-center gap-1 text-rose-400 font-semibold text-[11px]">
-              <span>🛑</span>
-              <span>{errorCount} エラー</span>
-            </span>
+            <Badge tone="danger">{errorCount} エラー</Badge>
           {/if}
           {#if warningCount > 0}
-            <span class="flex items-center gap-1 text-amber-400 font-medium text-[11px]">
-              <span>⚠️</span>
-              <span>{warningCount} 警告</span>
-            </span>
+            <Badge tone="warn">{warningCount} 警告</Badge>
           {/if}
         </div>
-        <span class="text-[10px] text-stone-500 font-mono">
-          {isDiagnosticsOpen ? "▼ 隠す" : "▲ 詳細を表示"}
-        </span>
-      </button>
+        <Button
+          variant="quiet"
+          size="sm"
+          iconEnd={isDiagnosticsOpen ? ChevronDown : ChevronUp}
+          aria-expanded={isDiagnosticsOpen}
+          onclick={() => (isDiagnosticsOpen = !isDiagnosticsOpen)}
+        >
+          {isDiagnosticsOpen ? "隠す" : "詳細を表示"}
+        </Button>
+      </div>
 
       {#if isDiagnosticsOpen}
-        <div class="flex-1 overflow-y-auto p-2 space-y-1 font-mono text-[11px]">
+        <div class="flex-1 overflow-y-auto p-2 pt-0 flex flex-col gap-2 select-text">
           {#each diagnostics as diag, i (i)}
-            <button
-              class="w-full text-left p-1.5 rounded flex items-start gap-2 hover:bg-stone-900 transition cursor-pointer border border-transparent hover:border-stone-800 {diag.severity === 'error' ? 'text-rose-300' : 'text-amber-300'}"
-              onclick={() => onJumpToLine?.(diag.line, diag.column)}
-              title="該当行へジャンプ"
-            >
-              <span class="shrink-0 text-xs">{diag.severity === "error" ? "✖" : "⚠"}</span>
-              <span class="text-stone-400 shrink-0 font-mono">[{diag.line}:{diag.column}]</span>
-              <span class="flex-1 break-words leading-relaxed text-stone-200">{diag.message}</span>
-            </button>
+            <Alert tone={diag.severity === "error" ? "danger" : "warn"}>
+              <div class="flex items-start gap-2">
+                {#if onJumpToLine}
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    onclick={() => onJumpToLine(diag.line, diag.column)}
+                    title="該当行へジャンプ"
+                  >
+                    [{diag.line}:{diag.column}]
+                  </Button>
+                {:else}
+                  <span class="shrink-0">[{diag.line}:{diag.column}]</span>
+                {/if}
+                <span class="flex-1 min-w-0 break-words">{diag.message}</span>
+              </div>
+            </Alert>
           {/each}
         </div>
       {/if}
@@ -197,5 +203,10 @@
     display: block;
     width: 100%;
     height: auto;
+  }
+
+  /* A divider between the preview and the diagnostics: one hairline, no frame. */
+  .typst-diagnostics {
+    border-top: var(--tln-hairline) solid var(--tln-border);
   }
 </style>

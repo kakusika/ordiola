@@ -35,7 +35,6 @@ export async function compileTypst(
   // Fallback mock SVG for browser preview dev
   const mockSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 595 842" width="595" height="842" class="typst-page">
-  <rect width="595" height="842" fill="#ffffff" />
   <text x="50" y="80" font-family="serif" font-size="24" font-weight="bold" fill="#111827">Typst Preview (Browser Mock)</text>
   <text x="50" y="120" font-family="serif" font-size="14" fill="#374151">Tauri desktop environment provides real-time Typst 0.15 compilation.</text>
   <line x1="50" y1="140" x2="545" y2="140" stroke="#e5e7eb" stroke-width="1" />
