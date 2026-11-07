@@ -1,29 +1,40 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { Editor } from "@tiptap/core";
-  import StarterKit from "@tiptap/starter-kit";
-  import FileTreeNode from "$lib/FileTreeNode.svelte";
-  import { CodeEditor } from "@telaion/editor";
+  import type { Editor } from "@tiptap/core";
+  import ExplorerPane from "$lib/ExplorerPane.svelte";
+  import VaultSwitcher from "$lib/VaultSwitcher.svelte";
+  import { creationDir, entryPath, joinPath, mockDetach, mockInsert, mockRelocate, parentPath, remapPath } from "$lib/explorer";
+  import type { NewEntryKind } from "$lib/explorer";
+  import { CodeEditor, sourceEditingExtensions } from "@telaion/editor";
+  import { RichText } from "@telaion/editor/rich-text";
+  import { Callout, HeadingMarkers } from "@telaion/tomet/rich-text";
   import { SplitPane } from "@telaion/shell";
-  import { Kanban, TreeExplorer } from "@telaion/views";
-  import type { KanbanColumnData, TreeNode } from "@telaion/views";
-  import { sourceExtras, sourceLanguage } from "$lib/sourceEditor";
+  import { Kanban } from "@telaion/views";
+  import type { KanbanColumnData } from "@telaion/views";
+  import { sourceLanguage } from "$lib/sourceEditor";
+  import { ConfirmDialog } from "@telaion/primitives";
   import ConfirmDelete from "$lib/ConfirmDelete.svelte";
-  import ConfirmUnsaved from "$lib/ConfirmUnsaved.svelte";
-  import { Callout } from "$lib/calloutExtension";
+  import QuickOpen from "$lib/QuickOpen.svelte";
+  import EmptyWorkspace from "$lib/EmptyWorkspace.svelte";
+  import ModeBanner from "$lib/ModeBanner.svelte";
+  import StatusBar from "$lib/StatusBar.svelte";
+  import WorkspaceHeader from "$lib/WorkspaceHeader.svelte";
+  import MetaInspector from "$lib/MetaInspector.svelte";
+  import TometBlockBar from "$lib/TometBlockBar.svelte";
+  import { mockProseMirrorDoc } from "$lib/mockDocument";
   import { TypstSplitView } from "@ordiola/ext-typst";
   import type {
     FileEntry,
     VaultEntry,
     VaultState,
-    InlineAction,
-    ContextMenuState,
     DeleteConfirmState,
     EditorTab,
+    TometDocConfig,
+    TometDocMeta,
   } from "$lib/types";
 
   // State (Svelte 5 runes)
-  let editorElement = $state<HTMLDivElement | null>(null);
+  // The Tiptap editor of the block modes, bound from `RichText`; there is one only while one of them is shown.
   let editor = $state<Editor | null>(null);
   let isTauri = $state<boolean>(false);
   let statusMessage = $state<string>("");
@@ -42,39 +53,31 @@
   let rawTextContent = $derived(activeTab ? activeTab.rawContent : "");
   let isTmtFile = $derived(activeTab ? activeTab.isTmt : false);
   let isTypstFile = $derived(activeTab ? activeTab.isTypst : false);
+  // The block modes edit the ProseMirror document of the tab; the other modes edit its text.
+  let isBlockMode = $derived(editMode === "hybrid" || editMode === "full");
 
   // Vault State
   let vaultName = $state<string>("ordiola");
   let vaultPath = $state<string>(".");
   let recentVaults = $state<VaultEntry[]>([]);
-  let isVaultMenuOpen = $state<boolean>(false);
-  let customVaultInput = $state<string>("");
 
-  // File Tree Explorer State
+  // File Tree Explorer State. `expandedPaths` is replaced, never changed in place: the tree reads it.
   let rootEntries = $state<FileEntry[]>([]);
   let expandedPaths = $state<Set<string>>(new Set());
   let selectedTreeId = $state<string | null>(null);
   let isRefreshing = $state<boolean>(false);
+  let explorer = $state<ReturnType<typeof ExplorerPane>>();
   let unlistenWatcher: (() => void) | null = null;
-
-  function toTreeNodes(entries: FileEntry[]): TreeNode[] {
-    return entries.map((e) => {
-      const id = e.relative_path || e.path;
-      return {
-        id,
-        label: e.name,
-        isFolder: e.is_dir,
-        children: e.children ? toTreeNodes(e.children) : (e.is_dir ? [] : undefined),
-        data: e,
-      };
-    });
-  }
-  let treeNodes = $derived(toTreeNodes(rootEntries));
 
   $effect(() => {
     if (activePath) {
       selectedTreeId = activePath;
     }
+  });
+
+  // Hybrid draws the Tomet markers around headings, full does not: a state of the editor, not of the document.
+  $effect(() => {
+    editor?.commands.setHeadingMarkers(editMode === "hybrid");
   });
 
   let kanbanColumns = $state<KanbanColumnData[]>([
@@ -102,68 +105,16 @@
     },
   ]);
 
-  let selectedEntry = $state<FileEntry | null>(null);
-  let selectedPath = $derived<string | null>(
-    selectedEntry ? selectedEntry.relative_path || selectedEntry.path : null
-  );
-  let selectedDir = $derived.by(() => {
-    if (!selectedEntry) return "";
-    if (selectedEntry.is_dir) return selectedEntry.relative_path || selectedEntry.path;
-    const p = selectedEntry.relative_path || selectedEntry.path;
-    const idx = p.lastIndexOf("/");
-    return idx > 0 ? p.substring(0, idx) : "";
-  });
+  // Where a new file goes when nothing says otherwise: the selected directory, else beside the selected file.
+  let selectedDir = $derived(creationDir(rootEntries, selectedTreeId));
 
-  let inlineAction = $state<InlineAction | null>(null);
-  let rootNewName = $state<string>("");
-  let isRootCreating = $derived(
-    inlineAction !== null &&
-      (inlineAction.type === "new-file" || inlineAction.type === "new-folder") &&
-      (inlineAction.parentPath === "" || inlineAction.parentPath === ".")
-  );
-
-  let contextMenu = $state<ContextMenuState | null>(null);
   let deleteConfirmModal = $state<DeleteConfirmState | null>(null);
 
-  // Quick Open state
+  // Quick Open: the workspace files are loaded when it opens; QuickOpen does the matching.
   let isQuickOpenOpen = $state<boolean>(false);
-  let quickOpenQuery = $state<string>("");
   let allWorkspaceFiles = $state<FileEntry[]>([]);
-  let quickOpenSelectedIndex = $state<number>(0);
-  let quickOpenInputEl = $state<HTMLInputElement | null>(null);
-
-  let filteredQuickOpenFiles = $derived.by(() => {
-    const q = quickOpenQuery.trim().toLowerCase();
-    if (!q) {
-      return allWorkspaceFiles.slice(0, 30);
-    }
-    return allWorkspaceFiles
-      .filter((f) => {
-        const pathLower = f.relative_path.toLowerCase();
-        const nameLower = f.name.toLowerCase();
-        if (nameLower.includes(q) || pathLower.includes(q)) return true;
-        let qi = 0;
-        for (let i = 0; i < pathLower.length && qi < q.length; i++) {
-          if (pathLower[i] === q[qi]) qi++;
-        }
-        return qi === q.length;
-      })
-      .slice(0, 30);
-  });
 
   // Document metadata & configuration state
-  interface TometDocMeta {
-    id: string;
-    title: string;
-    lang: string;
-    custom: Record<string, string>;
-  }
-
-  interface TometDocConfig {
-    export_type: string;
-    export_path: string;
-  }
-
   let docMeta = $state<TometDocMeta>({
     id: "doc-readme",
     title: "Ordiola ワークスペース",
@@ -177,9 +128,6 @@
   });
 
   let isMetaCardExpanded = $state<boolean>(false);
-  let metaActiveTab = $state<"meta" | "config">("meta");
-  let newCustomKey = $state<string>("");
-  let newCustomValue = $state<string>("");
 
   const defaultTometContent = `::config(
   export: {
@@ -207,39 +155,19 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
   onMount(async () => {
     isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-    // Initialize Tiptap instance for hybrid/full modes
-    if (editorElement) {
-      editor = new Editor({
-        element: editorElement,
-        extensions: [
-          StarterKit.configure({
-            heading: {
-              levels: [1, 2, 3, 4, 5, 6],
-            },
-          }),
-          Callout,
-        ],
-        content: `<h1>=[ Ordiola: 次世代 Tomet エディタ ]=</h1><p>Ordiola は <strong>Tomet</strong> 言語のためのワークスペース型デスクトップエディタです。</p>`,
-        editorProps: {
-          attributes: {
-            class: "focus:outline-none min-h-[500px] text-stone-200 text-base leading-relaxed",
-          },
-        },
-        onUpdate: () => {
-          if (editMode !== "source") {
-            isSaved = false;
-          }
-        },
-      });
-    }
-
     // Load initial vault and workspace files via Tauri IPC
     if (isTauri) {
       await initVault();
       setupFileWatcher();
     } else {
       rawTextContent = defaultTometContent;
-      // Mock entries for browser dev
+      // Mock vaults and entries for browser dev
+      recentVaults = [
+        { name: "ordiola", path: "/home/user/projects/ordiola", last_opened: 2 },
+        { name: "notes", path: "/home/user/documents/notes/with/a/rather/long/path/to/show/how/it/shortens", last_opened: 1 },
+      ];
+      vaultPath = recentVaults[0].path;
+      expandedPaths = new Set(["tmtroot"]);
       rootEntries = [
         {
           name: "tmtroot",
@@ -247,7 +175,6 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
           relative_path: "tmtroot",
           is_dir: true,
           has_children: true,
-          isExpanded: true,
           children: [
             { name: "readme.tmt", path: "tmtroot/readme.tmt", relative_path: "tmtroot/readme.tmt", is_dir: false, has_children: false },
             { name: "agents.tmt", path: "tmtroot/agents.tmt", relative_path: "tmtroot/agents.tmt", is_dir: false, has_children: false },
@@ -270,7 +197,6 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     if (unlistenWatcher) {
       unlistenWatcher();
     }
-    editor?.destroy();
   });
 
   function handleKeydown(e: KeyboardEvent) {
@@ -280,7 +206,7 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       return;
     }
 
-    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
       e.preventDefault();
       saveCurrentDocument();
       return;
@@ -313,52 +239,10 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
         return;
       }
     }
-
-    if (e.key === "Escape") {
-      if (isQuickOpenOpen) {
-        closeQuickOpen();
-        return;
-      }
-      if (closeConfirmTab) {
-        closeConfirmTab = null;
-        return;
-      }
-      if (deleteConfirmModal) {
-        deleteConfirmModal = null;
-        return;
-      }
-      if (contextMenu) {
-        closeContextMenu();
-        return;
-      }
-      if (inlineAction) {
-        cancelInlineAction();
-        return;
-      }
-    }
-
-    // Explorer shortcuts when not typing in an input or contenteditable editor
-    const targetTag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-    const isEditing =
-      targetTag === "input" ||
-      targetTag === "textarea" ||
-      (e.target as HTMLElement)?.isContentEditable;
-
-    if (!isEditing && selectedEntry) {
-      if (e.key === "F2") {
-        e.preventDefault();
-        startRename(selectedEntry);
-      } else if (e.key === "Delete") {
-        e.preventDefault();
-        confirmDelete(selectedEntry);
-      }
-    }
   }
 
   async function openQuickOpen() {
     isQuickOpenOpen = true;
-    quickOpenQuery = "";
-    quickOpenSelectedIndex = 0;
     if (isTauri) {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
@@ -376,46 +260,13 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
         { name: "default.config.tmt", path: "default.config.tmt", relative_path: "default.config.tmt", is_dir: false, has_children: false, extension: "tmt" },
       ];
     }
-    setTimeout(() => {
-      quickOpenInputEl?.focus();
-    }, 50);
-  }
-
-  function closeQuickOpen() {
-    isQuickOpenOpen = false;
-    quickOpenQuery = "";
-    quickOpenSelectedIndex = 0;
   }
 
   function toggleQuickOpen() {
     if (isQuickOpenOpen) {
-      closeQuickOpen();
+      isQuickOpenOpen = false;
     } else {
       openQuickOpen();
-    }
-  }
-
-  function handleQuickOpenKeydown(e: KeyboardEvent) {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      if (filteredQuickOpenFiles.length > 0) {
-        quickOpenSelectedIndex = (quickOpenSelectedIndex + 1) % filteredQuickOpenFiles.length;
-      }
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      if (filteredQuickOpenFiles.length > 0) {
-        quickOpenSelectedIndex = (quickOpenSelectedIndex - 1 + filteredQuickOpenFiles.length) % filteredQuickOpenFiles.length;
-      }
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const target = filteredQuickOpenFiles[quickOpenSelectedIndex];
-      if (target) {
-        closeQuickOpen();
-        openDocument(target.relative_path || target.path);
-      }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      closeQuickOpen();
     }
   }
 
@@ -452,8 +303,11 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
   }
 
   async function switchVault(targetPath: string) {
-    if (!isTauri || !targetPath.trim()) return;
-    isVaultMenuOpen = false;
+    if (!targetPath.trim()) return;
+    if (!isTauri) {
+      statusMessage = "ブラウザ環境では Vault を切り替えられません";
+      return;
+    }
     statusMessage = `Vault 切り替え中: ${targetPath}...`;
 
     try {
@@ -465,9 +319,8 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       vaultName = res.state.current_name;
       vaultPath = res.state.current_path;
       recentVaults = res.state.recent_vaults;
-      expandedPaths.clear();
+      expandedPaths = new Set();
       rootEntries = res.files || [];
-      customVaultInput = "";
 
       statusMessage = `Vault 開封: ${vaultName}`;
 
@@ -480,7 +333,6 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
   }
 
   async function openFolderDialog() {
-    isVaultMenuOpen = false;
     if (!isTauri) {
       statusMessage = "ブラウザ環境ではネイティブフォルダ選択は利用できません";
       return;
@@ -514,7 +366,7 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     // 1. If tmtroot exists, expand it automatically
     const tmtroot = entries.find((e) => e.name === "tmtroot" && e.is_dir);
     if (tmtroot) {
-      await toggleDirectory(tmtroot);
+      await expandDirectory(tmtroot);
       const target =
         tmtroot.children?.find((c: FileEntry) => c.name.includes("readme.tmt")) ||
         tmtroot.children?.[0];
@@ -538,8 +390,16 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     }
   }
 
+  // A refresh asked for while one is running (a file was created as the last one was reading) is not lost:
+  // what the running one read may already be out of date, so it runs once more when that one is done.
+  let refreshAgain = false;
+
   async function refreshWorkspace() {
-    if (!isTauri || isRefreshing) return;
+    if (!isTauri) return;
+    if (isRefreshing) {
+      refreshAgain = true;
+      return;
+    }
     isRefreshing = true;
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -553,6 +413,10 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     } finally {
       isRefreshing = false;
     }
+    if (refreshAgain) {
+      refreshAgain = false;
+      await refreshWorkspace();
+    }
   }
 
   async function rehydrateExpanded(entries: FileEntry[], openPaths: Set<string>) {
@@ -562,7 +426,6 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
         try {
           const children = await invoke<FileEntry[]>("list_directory", { path: entry.relative_path });
           entry.children = children;
-          entry.isExpanded = true;
           if (children.length > 0) {
             await rehydrateExpanded(children, openPaths);
           }
@@ -573,30 +436,13 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     }
   }
 
-  async function toggleDirectory(entry: FileEntry) {
-    if (!entry.is_dir) return;
-
-    if (entry.isExpanded) {
-      entry.isExpanded = false;
-      expandedPaths.delete(entry.relative_path);
-      return;
-    }
-
-    // Lazy load children on demand
+  /** Lists the children of a directory. Done each time it is opened, so that what is shown is what is on disk. */
+  async function loadChildren(entry: FileEntry) {
+    if (!entry.is_dir || !isTauri) return;
     entry.isLoading = true;
-    if (!isTauri) {
-      entry.isExpanded = true;
-      entry.isLoading = false;
-      expandedPaths.add(entry.relative_path);
-      return;
-    }
-
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      const children = await invoke<FileEntry[]>("list_directory", { path: entry.relative_path });
-      entry.children = children || [];
-      entry.isExpanded = true;
-      expandedPaths.add(entry.relative_path);
+      entry.children = (await invoke<FileEntry[]>("list_directory", { path: entry.relative_path })) || [];
     } catch (err: any) {
       console.error("Failed to list directory:", err);
       statusMessage = `ディレクトリ展開エラー: ${err?.message || err}`;
@@ -605,39 +451,22 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     }
   }
 
-  async function handleFileSelect(file: FileEntry) {
-    selectedEntry = file;
-    await openDocument(file.path || file.relative_path);
+  function expand(...paths: string[]) {
+    expandedPaths = new Set([...expandedPaths, ...paths]);
   }
 
-  function startCreateFile(parentDir: string = "") {
-    inlineAction = {
-      type: "new-file",
-      parentPath: parentDir,
-    };
-    rootNewName = "";
-    if (parentDir) {
-      expandPathRecursive(parentDir);
-    }
+  async function expandDirectory(entry: FileEntry) {
+    await loadChildren(entry);
+    expand(entryPath(entry));
   }
 
-  function startCreateFolder(parentDir: string = "") {
-    inlineAction = {
-      type: "new-folder",
-      parentPath: parentDir,
-    };
-    rootNewName = "";
-    if (parentDir) {
-      expandPathRecursive(parentDir);
-    }
+  // The explorer is where a name is typed; these start it. A directory of "" is the root of the vault.
+  function startCreateFile(parentDir?: string) {
+    void explorer?.startCreate("file", parentDir);
   }
 
-  function startRename(entry: FileEntry) {
-    inlineAction = {
-      type: "rename",
-      parentPath: "",
-      targetEntry: entry,
-    };
+  function startCreateFolder(parentDir?: string) {
+    void explorer?.startCreate("folder", parentDir);
   }
 
   function confirmDelete(entry: FileEntry) {
@@ -647,164 +476,82 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     };
   }
 
-  function cancelInlineAction() {
-    inlineAction = null;
-    rootNewName = "";
-  }
-
-  function closeContextMenu() {
-    contextMenu = null;
-  }
-
-  function handleContextMenu(e: MouseEvent, entry: FileEntry) {
-    selectedEntry = entry;
-    const x = Math.min(e.clientX, window.innerWidth - 210);
-    const y = Math.min(e.clientY, window.innerHeight - 230);
-    contextMenu = {
-      visible: true,
-      x: Math.max(10, x),
-      y: Math.max(10, y),
-      entry,
-    };
-  }
-
-  function handleBackgroundContextMenu(e: MouseEvent) {
-    if (e.defaultPrevented) return;
-    e.preventDefault();
-    const x = Math.min(e.clientX, window.innerWidth - 210);
-    const y = Math.min(e.clientY, window.innerHeight - 210);
-    contextMenu = {
-      visible: true,
-      x: Math.max(10, x),
-      y: Math.max(10, y),
-      entry: null,
-    };
-  }
-
-  function collapseAll() {
-    expandedPaths.clear();
-    function collapseInTree(entries: FileEntry[]) {
-      for (const e of entries) {
-        if (e.is_dir) {
-          e.isExpanded = false;
-          if (e.children) collapseInTree(e.children);
-        }
-      }
+  /** A file or directory (and what is in it) went from path `from` to path `to`: what shows it follows. */
+  function followPath(from: string, to: string) {
+    for (const tab of tabs) {
+      const path = remapPath(tab.path, from, to);
+      if (path === tab.path) continue;
+      if (tab.id === activeTabId) activeTabId = path;
+      tab.id = tab.path = path;
+      tab.title = path.substring(path.lastIndexOf("/") + 1);
     }
-    collapseInTree(rootEntries);
+    expandedPaths = new Set([...expandedPaths].map((path) => remapPath(path, from, to)));
+    if (selectedTreeId) selectedTreeId = remapPath(selectedTreeId, from, to);
   }
 
-  async function expandPathRecursive(dirPath: string) {
-    expandedPaths.add(dirPath);
-    async function findAndExpand(entries: FileEntry[]): Promise<boolean> {
-      for (const e of entries) {
-        if (e.is_dir && (e.relative_path === dirPath || e.path === dirPath)) {
-          if (!e.children || e.children.length === 0) {
-            await toggleDirectory(e);
-          } else {
-            e.isExpanded = true;
-          }
-          return true;
-        }
-        if (e.is_dir && e.children) {
-          const found = await findAndExpand(e.children);
-          if (found) {
-            e.isExpanded = true;
-            expandedPaths.add(e.relative_path || e.path);
-            return true;
-          }
-        }
-      }
-      return false;
-    }
-    await findAndExpand(rootEntries);
-  }
-
-  async function commitInlineAction(value: string) {
-    if (!inlineAction) return;
-    const action = inlineAction;
-    inlineAction = null;
-    rootNewName = "";
-
-    const targetRelative = action.parentPath
-      ? `${action.parentPath}/${value}`
-      : value;
+  /** A name was typed for a new file or folder. A message in return refuses it. */
+  async function createEntry(directory: string, name: string, kind: NewEntryKind): Promise<string | void> {
+    const target = joinPath(directory, name);
 
     if (!isTauri) {
-      if (action.type === "new-file") {
-        rootEntries.push({
-          name: value,
-          path: targetRelative,
-          relative_path: targetRelative,
-          is_dir: false,
-          has_children: false,
-        });
-        await openDocument(targetRelative);
-      } else if (action.type === "new-folder") {
-        rootEntries.push({
-          name: value,
-          path: targetRelative,
-          relative_path: targetRelative,
-          is_dir: true,
-          has_children: false,
-          children: [],
-        });
-      } else if (action.type === "rename" && action.targetEntry) {
-        action.targetEntry.name = value;
-        action.targetEntry.relative_path = targetRelative;
-        action.targetEntry.path = targetRelative;
-      }
+      mockInsert(rootEntries, directory, {
+        name,
+        path: target,
+        relative_path: target,
+        is_dir: kind === "folder",
+        has_children: false,
+        children: kind === "folder" ? [] : undefined,
+      });
+      if (kind === "file") void openDocument(target);
       return;
     }
 
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      if (action.type === "new-file") {
-        const initialContent = targetRelative.endsWith(".tmt")
-          ? `=[ ${value.replace(/\.tmt$/, "")} ]=\n\n`
-          : targetRelative.endsWith(".typ")
-          ? `= ${value.replace(/\.typ$/, "")}\n\nWrite your Typst document here.\n`
+      if (kind === "file") {
+        const initialContent = target.endsWith(".tmt")
+          ? `=[ ${name.replace(/\.tmt$/, "")} ]=\n\n`
+          : target.endsWith(".typ")
+          ? `= ${name.replace(/\.typ$/, "")}\n\nWrite your Typst document here.\n`
           : "";
-        await invoke<FileEntry>("create_file", {
-          path: targetRelative,
-          content: initialContent,
-        });
-        if (action.parentPath) {
-          expandedPaths.add(action.parentPath);
-        }
-        await refreshWorkspace();
-        await openDocument(targetRelative);
-        statusMessage = `ファイル作成: ${targetRelative}`;
-      } else if (action.type === "new-folder") {
-        await invoke<FileEntry>("create_directory", {
-          path: targetRelative,
-        });
-        expandedPaths.add(targetRelative);
-        if (action.parentPath) {
-          expandedPaths.add(action.parentPath);
-        }
-        await refreshWorkspace();
-        statusMessage = `フォルダ作成: ${targetRelative}`;
-      } else if (action.type === "rename" && action.targetEntry) {
-        const oldRel = action.targetEntry.relative_path || action.targetEntry.path;
-        await invoke<FileEntry>("rename_entry", {
-          oldPath: oldRel,
-          newName: value,
-        });
-        if (activePath === oldRel || activePath === action.targetEntry.path) {
-          const parent = action.targetEntry.relative_path.includes("/")
-            ? action.targetEntry.relative_path.substring(0, action.targetEntry.relative_path.lastIndexOf("/"))
-            : "";
-          const newRel = parent ? `${parent}/${value}` : value;
-          activePath = newRel;
-          activeFile = value;
-        }
-        await refreshWorkspace();
-        statusMessage = `名前変更: ${value}`;
+        await invoke<FileEntry>("create_file", { path: target, content: initialContent });
+      } else {
+        await invoke<FileEntry>("create_directory", { path: target });
+        expand(target);
+      }
+      if (directory) expand(directory);
+      await refreshWorkspace();
+      if (kind === "file") {
+        void openDocument(target).then(() => (statusMessage = `ファイル作成: ${target}`));
+      } else {
+        statusMessage = `フォルダ作成: ${target}`;
       }
     } catch (err: any) {
       console.error("File operation error:", err);
-      statusMessage = `操作失敗: ${err?.message || err}`;
+      return (statusMessage = `操作失敗: ${err?.message || err}`);
+    }
+  }
+
+  /** A new name was typed for an entry. A message in return refuses it. */
+  async function renameEntry(entry: FileEntry, name: string): Promise<string | void> {
+    const from = entryPath(entry);
+    const to = joinPath(parentPath(from), name);
+
+    if (!isTauri) {
+      mockRelocate(entry, from, to);
+      followPath(from, to);
+      return;
+    }
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke<FileEntry>("rename_entry", { oldPath: from, newName: name });
+      followPath(from, to);
+      await refreshWorkspace();
+      statusMessage = `名前変更: ${name}`;
+    } catch (err: any) {
+      console.error("File operation error:", err);
+      return (statusMessage = `操作失敗: ${err?.message || err}`);
     }
   }
 
@@ -840,71 +587,35 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     }
   }
 
-  async function handleMoveEntry(sourceRel: string, destDirRel: string) {
-    if (!sourceRel) return;
-    const srcParent = sourceRel.includes("/") ? sourceRel.substring(0, sourceRel.lastIndexOf("/")) : "";
-    const cleanDest = destDirRel === "." ? "" : destDirRel;
-    if (srcParent === cleanDest) {
-      return;
-    }
+  /** An entry was dropped into a directory (`""` is the root of the vault). */
+  async function moveEntry(entry: FileEntry, directory: string) {
+    const from = entryPath(entry);
+    if (parentPath(from) === directory) return;
 
     if (!isTauri) {
-      statusMessage = `移動完了（モック）: ${sourceRel} -> ${destDirRel}`;
+      const moved = mockDetach(rootEntries, from);
+      if (!moved) return;
+      const to = joinPath(directory, moved.name);
+      mockRelocate(moved, from, to);
+      mockInsert(rootEntries, directory, moved);
+      followPath(from, to);
+      statusMessage = `移動完了（モック）: ${from} -> ${to}`;
       return;
     }
 
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const movedEntry = await invoke<FileEntry>("move_entry", {
-        sourcePath: sourceRel,
-        destDir: destDirRel || ".",
+        sourcePath: from,
+        destDir: directory || ".",
       });
-
-      // Update open tabs if the moved entry or its descendants are open
-      for (const tab of tabs) {
-        if (tab.path === sourceRel) {
-          tab.path = movedEntry.relative_path;
-          tab.title = movedEntry.name;
-        } else if (tab.path.startsWith(sourceRel + "/")) {
-          tab.path = movedEntry.relative_path + tab.path.substring(sourceRel.length);
-        }
-      }
-
-      // Update activePath if opened file was moved
-      if (activePath === sourceRel) {
-        activePath = movedEntry.relative_path;
-        activeFile = movedEntry.name;
-      } else if (activePath.startsWith(sourceRel + "/")) {
-        activePath = movedEntry.relative_path + activePath.substring(sourceRel.length);
-      }
-
+      followPath(from, movedEntry.relative_path);
       await refreshWorkspace();
-      statusMessage = `移動完了: ${sourceRel} -> ${movedEntry.relative_path}`;
+      statusMessage = `移動完了: ${from} -> ${movedEntry.relative_path}`;
     } catch (err: any) {
       console.error("Move error:", err);
       statusMessage = `移動失敗: ${err?.message || err}`;
     }
-  }
-
-  async function handleRootNewKeyDown(e: KeyboardEvent) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      e.stopPropagation();
-      const val = rootNewName.trim();
-      if (val) {
-        await commitInlineAction(val);
-      } else {
-        cancelInlineAction();
-      }
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      cancelInlineAction();
-    }
-  }
-
-  function focusRootInput(node: HTMLInputElement) {
-    node.focus();
   }
 
   async function openDocument(filePath: string) {
@@ -964,12 +675,28 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     statusMessage = `ロード完了: ${title}`;
   }
 
+  // The engine turns Tomet text into ProseMirror JSON and back. The browser build has none, so it answers
+  // with one fixed document (see mockDocument.ts) and cannot write a document out.
+  async function parseTomet(source: string): Promise<any> {
+    if (!isTauri) return mockProseMirrorDoc;
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<any>("parse_tomet_string", { source });
+  }
+
+  async function serializeTomet(doc: unknown): Promise<string> {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<string>("serialize_prosemirror_doc", { doc: $state.snapshot(doc) });
+  }
+
+  /** The text of a tab: written out from its ProseMirror document while it is in a block mode, else its own. */
+  async function textOf(tab: EditorTab): Promise<string> {
+    const inBlockMode = tab.editMode === "hybrid" || tab.editMode === "full";
+    if (!isTauri || !tab.isTmt || !inBlockMode || !tab.pmDoc) return tab.rawContent;
+    return serializeTomet(tab.pmDoc);
+  }
+
   async function switchTab(tabId: string) {
     if (tabId === activeTabId) return;
-
-    if (activeTab && editor && activeTab.editMode !== "source") {
-      activeTab.pmDoc = editor.getJSON();
-    }
 
     activeTabId = tabId;
 
@@ -977,20 +704,12 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       await loadTometMetaAndConfig(activeTab.rawContent);
     }
 
-    if (activeTab && editor && activeTab.editMode !== "source") {
-      if (activeTab.pmDoc) {
-        editor.commands.setContent(activeTab.pmDoc);
-      } else if (activeTab.rawContent) {
-        if (isTauri) {
-          try {
-            const { invoke } = await import("@tauri-apps/api/core");
-            const parsed = await invoke<any>("parse_tomet_string", { source: activeTab.rawContent });
-            editor.commands.setContent(parsed);
-            activeTab.pmDoc = parsed;
-          } catch (e) {
-            console.warn("Tomet parse on switch warning:", e);
-          }
-        }
+    // The document of a tab in a block mode is `pmDoc`, which RichText shows; one not parsed yet is parsed now.
+    if (activeTab && isBlockMode && !activeTab.pmDoc && activeTab.rawContent) {
+      try {
+        activeTab.pmDoc = await parseTomet(activeTab.rawContent);
+      } catch (e) {
+        console.warn("Tomet parse on switch warning:", e);
       }
     }
   }
@@ -1026,7 +745,7 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       if (isTauri) {
         try {
           const { invoke } = await import("@tauri-apps/api/core");
-          await invoke("write_text_file", { path: tab.path, content: tab.rawContent });
+          await invoke("write_text_file", { path: tab.path, content: await textOf(tab) });
         } catch (e: any) {
           console.error("Save on close failed:", e);
         }
@@ -1098,21 +817,6 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     }
   }
 
-  function addCustomMetaField() {
-    const k = newCustomKey.trim();
-    if (k) {
-      docMeta.custom[k] = newCustomValue.trim();
-      docMeta.custom = { ...docMeta.custom };
-      newCustomKey = "";
-      newCustomValue = "";
-    }
-  }
-
-  function removeCustomMetaField(key: string) {
-    delete docMeta.custom[key];
-    docMeta.custom = { ...docMeta.custom };
-  }
-
   function insertTometBlock(kind: string) {
     if (!activeTab) return;
     let snippet = "";
@@ -1133,12 +837,9 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       activeTab.isModified = true;
       statusMessage = `${kind} ブロックを挿入しました`;
     } else if (editor) {
-      if (kind === "code") {
-        editor.chain().focus().setCodeBlock().insertContent('console.log("Hello, Tomet!");').run();
-      } else {
-        editor.chain().focus().insertContent(`<div data-callout="${kind}" class="tomet-callout-card tomet-callout-${kind}"><p>ここに${kind}の本文を入力</p></div>`).run();
-      }
-      activeTab.isModified = true;
+      // The same button again takes the block away; a callout of another kind changes the kind.
+      const chain = editor.chain().focus();
+      (kind === "code" ? chain.toggleCodeBlock() : chain.toggleCallout({ type: kind })).run();
       statusMessage = `${kind} ブロックを挿入しました`;
     }
   }
@@ -1153,27 +854,14 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       return;
     }
 
+    const tab = activeTab;
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-      if (activeTab.editMode === "source" || !activeTab.isTmt) {
-        await invoke("write_text_file", {
-          path: activeTab.path,
-          content: activeTab.rawContent,
-        });
-      } else {
-        const json = editor?.getJSON();
-        if (json) {
-          const tometStr = await invoke<string>("serialize_prosemirror_doc", { doc: json });
-          await invoke("write_text_file", {
-            path: activeTab.path,
-            content: tometStr,
-          });
-          activeTab.rawContent = tometStr;
-          activeTab.pmDoc = json;
-        }
-      }
-      activeTab.isModified = false;
-      statusMessage = `保存完了: ${activeTab.path}`;
+      const content = await textOf(tab);
+      await invoke("write_text_file", { path: tab.path, content });
+      tab.rawContent = content;
+      tab.isModified = false;
+      statusMessage = `保存完了: ${tab.path}`;
     } catch (err: any) {
       console.error("Failed to save document:", err);
       statusMessage = `保存失敗: ${err?.message || err}`;
@@ -1195,38 +883,33 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
       return;
     }
 
-    if (mode === "hybrid" || mode === "full") {
-      if (isTauri && editor) {
-        try {
-          const { invoke } = await import("@tauri-apps/api/core");
-          const pmDoc = await invoke<any>("parse_tomet_string", { source: activeTab.rawContent });
-          if (pmDoc) {
-            editor.commands.setContent(pmDoc);
-            activeTab.pmDoc = pmDoc;
-          }
-        } catch (err: any) {
-          console.warn("Could not parse Tomet into ProseMirror:", err);
-          statusMessage = `構文解析エラーのためソース編集のままにします: ${err?.message || err}`;
-          return;
-        }
+    // The text and the ProseMirror document are two forms of one document, and only one of them is edited at
+    // a time. Going into the block modes makes the document from the text; leaving them writes the text from
+    // the document. Between hybrid and full the editor is the same one and nothing is converted.
+    const tab = activeTab;
+    const toBlocks = (mode === "hybrid" || mode === "full") && !isBlockMode;
+    const fromBlocks = (mode === "source" || mode === "kanban") && isBlockMode;
+
+    if (toBlocks) {
+      try {
+        const pmDoc = await parseTomet(tab.rawContent);
+        if (pmDoc) tab.pmDoc = pmDoc;
+      } catch (err: any) {
+        console.warn("Could not parse Tomet into ProseMirror:", err);
+        statusMessage = `構文解析エラーのためソース編集のままにします: ${err?.message || err}`;
+        return;
       }
-    } else if (mode === "source" && (activeTab.editMode === "hybrid" || activeTab.editMode === "full")) {
-      if (isTauri && editor) {
-        try {
-          const { invoke } = await import("@tauri-apps/api/core");
-          const json = editor.getJSON();
-          const tometStr = await invoke<string>("serialize_prosemirror_doc", { doc: json });
-          if (tometStr) {
-            activeTab.rawContent = tometStr;
-            activeTab.pmDoc = json;
-          }
-        } catch (err: any) {
-          console.warn("Could not serialize ProseMirror into Tomet:", err);
-        }
+    } else if (fromBlocks) {
+      try {
+        tab.rawContent = await textOf(tab);
+      } catch (err: any) {
+        console.warn("Could not serialize ProseMirror into Tomet:", err);
+        statusMessage = `Tomet への書き出しに失敗したためブロック編集のままにします: ${err?.message || err}`;
+        return;
       }
     }
 
-    activeTab.editMode = mode;
+    tab.editMode = mode;
   }
 </script>
 
@@ -1235,571 +918,48 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
     {#snippet primary()}
       <!-- Left Sidebar: Workspace Vault & Lazy Tree Explorer -->
       <aside class="h-full w-full border-r border-tln-border bg-tln-content flex flex-col relative overflow-hidden">
-    <!-- Vault Header & Switcher Trigger -->
-    <div class="p-3 border-b border-stone-800 relative">
-      <div class="flex items-center gap-1.5 relative group/vault">
-        <button
-          class="flex-1 flex items-center justify-between p-2 rounded-lg bg-stone-800/60 hover:bg-stone-800 transition border border-stone-700/50 text-left cursor-pointer min-w-0"
-          onclick={() => (isVaultMenuOpen = !isVaultMenuOpen)}
-          title="Vault を切り替える"
-        >
-          <div class="flex items-baseline gap-2 min-w-0 flex-1 mr-2">
-            <span class="text-xs shrink-0">📂</span>
-            <span class="font-bold text-xs text-stone-200 shrink-0">{vaultName}</span>
-            <span class="text-[10px] text-stone-500 font-mono truncate flex-1">{vaultPath}</span>
-          </div>
-          <span class="text-stone-400 text-[10px] shrink-0">▼</span>
-        </button>
+    <VaultSwitcher name={vaultName} path={vaultPath} recent={recentVaults} onswitch={switchVault} onpick={openFolderDialog} />
 
-        <!-- Quick Native Folder Picker Trigger -->
-        <button
-          class="p-2 rounded-lg bg-stone-800/60 hover:bg-stone-800 hover:text-sky-300 transition border border-stone-700/50 text-stone-400 text-xs cursor-pointer shrink-0"
-          onclick={openFolderDialog}
-          title="ネイティブフォルダ選択でVaultを開く"
-        >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            <line x1="12" y1="11" x2="12" y2="17"/>
-            <line x1="9" y1="14" x2="15" y2="14"/>
-          </svg>
-        </button>
+    <ExplorerPane
+      bind:this={explorer}
+      entries={rootEntries}
+      bind:selectedId={selectedTreeId}
+      bind:expandedIds={expandedPaths}
+      refreshing={isRefreshing}
+      onload={loadChildren}
+      onopen={(file) => openDocument(file.path || file.relative_path)}
+      oncreate={createEntry}
+      onrename={renameEntry}
+      onmove={moveEntry}
+      ondelete={confirmDelete}
+      onrefresh={refreshWorkspace}
+    />
 
-        <!-- Hover detail tooltip showing full path with wrapping when menu is closed -->
-        {#if !isVaultMenuOpen}
-          <div
-            class="absolute left-0 right-0 top-full mt-1.5 hidden group-hover/vault:block z-40 bg-stone-900 border border-stone-700/80 p-2 rounded-lg shadow-2xl text-xs pointer-events-none backdrop-blur-md"
-          >
-            <div class="flex items-center gap-1.5 font-semibold text-stone-200 mb-1">
-              <span>📂</span>
-              <span>{vaultName}</span>
-            </div>
-            <div class="text-[10px] text-stone-400 font-mono break-all leading-relaxed bg-stone-950/80 p-1.5 rounded border border-stone-800">
-              {vaultPath}
-            </div>
-          </div>
-        {/if}
-      </div>
-
-      <!-- Vault Switcher Dropdown Popover -->
-      {#if isVaultMenuOpen}
-        <div
-          class="absolute top-full left-3 right-3 mt-1.5 bg-stone-900 border border-stone-700 rounded-lg shadow-2xl p-2 z-50 text-xs space-y-2 backdrop-blur-md"
-        >
-          <div class="px-2 py-1 text-[10px] font-semibold text-stone-400 uppercase tracking-wider flex items-center justify-between border-b border-stone-800 pb-1">
-            <span>Recent Vaults</span>
-            <button class="text-stone-400 hover:text-stone-200 cursor-pointer" onclick={() => (isVaultMenuOpen = false)}>✕</button>
-          </div>
-
-          <!-- Recent vaults list -->
-          <div class="max-h-48 overflow-y-auto space-y-1">
-            {#each recentVaults as vault}
-              <button
-                class="w-full text-left px-2 py-1.5 rounded transition group/vitem cursor-pointer {vault.path === vaultPath ? 'bg-emerald-950/40 text-emerald-300 font-medium' : 'text-stone-300 hover:bg-stone-800'}"
-                onclick={() => switchVault(vault.path)}
-              >
-                <div class="flex items-center justify-between gap-1">
-                  <div class="flex items-baseline gap-2 min-w-0 flex-1">
-                    <span class="font-medium text-xs text-stone-200 shrink-0">{vault.name}</span>
-                    <span class="text-[10px] text-stone-500 font-mono truncate group-hover/vitem:hidden">{vault.path}</span>
-                  </div>
-                  {#if vault.path === vaultPath}
-                    <span class="text-xs text-emerald-400 shrink-0">✓</span>
-                  {/if}
-                </div>
-                <!-- Hover-expanded full path with wrapping -->
-                <div class="hidden group-hover/vitem:block text-[10px] text-stone-400 font-mono break-all leading-relaxed bg-stone-950/60 p-1.5 rounded border border-stone-800/80 mt-1">
-                  {vault.path}
-                </div>
-              </button>
-            {/each}
-          </div>
-
-          <!-- Native Directory Dialog Button -->
-          <div class="pt-2 border-t border-stone-800">
-            <button
-              class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 hover:text-sky-100 border border-sky-500/30 hover:border-sky-500/60 transition font-medium text-xs cursor-pointer shadow-sm"
-              onclick={openFolderDialog}
-            >
-              <span>📂</span>
-              <span>フォルダを選択して開く...</span>
-            </button>
-          </div>
-
-          <!-- Open other directory input -->
-          <div class="pt-2 border-t border-stone-800 space-y-1.5">
-            <span class="text-[10px] text-stone-400 block px-1">直接パスを入力:</span>
-            <div class="flex gap-1.5">
-              <input
-                type="text"
-                placeholder="/path/to/vault"
-                bind:value={customVaultInput}
-                class="flex-1 bg-stone-950 border border-stone-700 rounded px-2 py-1 text-stone-200 font-mono text-[11px] focus:outline-none focus:border-stone-500"
-                onkeydown={(e) => e.key === "Enter" && switchVault(customVaultInput)}
-              />
-              <button
-                class="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded text-[11px] transition font-medium shrink-0 cursor-pointer"
-                onclick={() => switchVault(customVaultInput)}
-              >
-                開く
-              </button>
-            </div>
-          </div>
-        </div>
-      {/if}
-    </div>
-
-    <!-- Explorer Section Header -->
-    <div class="px-3 pt-3 pb-1 flex items-center justify-between text-stone-400 border-b border-stone-800/50">
-      <span class="text-[10px] font-bold tracking-wider uppercase text-stone-400">Explorer</span>
-      <div class="flex items-center gap-0.5">
-        <button
-          class="p-1 rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition text-xs cursor-pointer"
-          onclick={() => startCreateFile(selectedDir || "")}
-          title="新しいファイルを作成"
-        >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="12" y1="18" x2="12" y2="12"/>
-            <line x1="9" y1="15" x2="15" y2="15"/>
-          </svg>
-        </button>
-        <button
-          class="p-1 rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition text-xs cursor-pointer"
-          onclick={() => startCreateFolder(selectedDir || "")}
-          title="新しいフォルダを作成"
-        >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-            <line x1="12" y1="11" x2="12" y2="17"/>
-            <line x1="9" y1="14" x2="15" y2="14"/>
-          </svg>
-        </button>
-        <button
-          class="p-1 rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition text-xs cursor-pointer"
-          onclick={refreshWorkspace}
-          title="エクスプローラーを再読み込み"
-        >
-          <svg class="w-3.5 h-3.5 {isRefreshing ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
-          </svg>
-        </button>
-        <button
-          class="p-1 rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 transition text-xs cursor-pointer"
-          onclick={collapseAll}
-          title="すべてのフォルダを折りたたむ"
-        >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="4 14 10 14 10 20"/>
-            <polyline points="20 10 14 10 14 4"/>
-            <line x1="14" y1="10" x2="21" y2="3"/>
-            <line x1="3" y1="21" x2="10" y2="14"/>
-          </svg>
-        </button>
-      </div>
-    </div>
-
-    <!-- Lazy Loading Tree Explorer Area -->
-    <div
-      class="p-2 flex-1 overflow-y-auto space-y-0.5"
-      role="tree"
-      tabindex="0"
-      onclick={() => (selectedEntry = null)}
-      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') selectedEntry = null; }}
-      oncontextmenu={handleBackgroundContextMenu}
-      ondragover={(e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; }}
-      ondrop={(e) => {
-        e.preventDefault();
-        const src = e.dataTransfer?.getData("text/plain");
-        if (src) {
-          handleMoveEntry(src, ".");
-        }
-      }}
-    >
-      <!-- Root-level inline create row -->
-      {#if isRootCreating}
-        <div
-          class="flex items-center gap-1.5 py-1 px-1.5 rounded bg-stone-900 border border-sky-500 shadow-sm mb-1"
-          style="padding-left: 6px;"
-          role="presentation"
-          onclick={(e) => e.stopPropagation()}
-          onkeydown={(e) => e.stopPropagation()}
-        >
-          <span class="w-3 shrink-0"></span>
-          <span class="text-sm shrink-0">
-            {inlineAction?.type === "new-folder" ? "📁" : "📄"}
-          </span>
-          <input
-            type="text"
-            bind:value={rootNewName}
-            placeholder={inlineAction?.type === "new-folder" ? "フォルダ名" : "ファイル名.tmt"}
-            class="flex-1 bg-stone-950 border border-sky-500 rounded px-1.5 py-0.5 text-[11px] font-mono text-stone-100 focus:outline-none"
-            onkeydown={handleRootNewKeyDown}
-            onblur={() => setTimeout(() => { if (isRootCreating) cancelInlineAction(); }, 150)}
-            use:focusRootInput
-          />
-        </div>
-      {/if}
-
-      {#if rootEntries.length === 0 && !isRootCreating}
-        <div class="text-tln-fg-muted text-xs p-3 text-center italic font-mono">
-          ファイルが見つかりません
-        </div>
-      {:else}
-        <TreeExplorer
-          nodes={treeNodes}
-          bind:selectedId={selectedTreeId}
-          bind:expandedIds={expandedPaths}
-          onselect={(node) => {
-            if (node.data) {
-              const entry = node.data as FileEntry;
-              if (!entry.is_dir) {
-                handleFileSelect(entry);
-              } else {
-                selectedEntry = entry;
-              }
-            }
-          }}
-          ontoggle={(node, expanded) => {
-            if (node.data) {
-              const entry = node.data as FileEntry;
-              if (entry.is_dir) {
-                toggleDirectory(entry);
-              }
-            }
-          }}
-        />
-      {/if}
-    </div>
-
-    <!-- Bottom Status / Diagnostics -->
-    <div class="p-3 border-t border-tln-border bg-tln-well text-[11px] text-tln-fg-muted space-y-1.5">
-      <div class="flex items-center justify-between">
-        <span>Backend:</span>
-        <span class="font-mono text-tln-ok">{isTauri ? "Tauri v3 IPC" : "Web (Vite)"}</span>
-      </div>
-      {#if statusMessage}
-        <div class="text-[10px] text-tln-fg-muted truncate font-mono" title={statusMessage}>
-          {statusMessage}
-        </div>
-      {/if}
-    </div>
+    <StatusBar backend={isTauri ? "Tauri v3 IPC" : "Web (Vite)"} message={statusMessage} />
   </aside>
   {/snippet}
   {#snippet secondary()}
   <!-- Main Workspace Canvas -->
   <main class="h-full w-full flex flex-col overflow-hidden bg-tln-canvas">
-    <!-- Top Bar: Tab Strip, Mode Switcher, Actions -->
-    <header class="h-11 border-b border-stone-800/80 px-2 flex items-center justify-between shrink-0 bg-stone-900/60 backdrop-blur-sm select-none gap-2 min-w-0">
-      <!-- Tabs Strip Area -->
-      <div class="flex items-center gap-1 overflow-x-auto min-w-0 flex-1 scrollbar-none py-1">
-        {#each tabs as tab (tab.id)}
-          <div
-            class="group flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono transition cursor-pointer shrink-0 border
-              {tab.id === activeTabId
-                ? 'bg-stone-800/90 text-stone-100 border-stone-700/80 shadow-sm'
-                : 'text-stone-400 hover:text-stone-200 hover:bg-stone-800/40 border-transparent'}"
-            role="tab"
-            tabindex="0"
-            onclick={() => switchTab(tab.id)}
-            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && switchTab(tab.id)}
-            onauxclick={(e) => { if (e.button === 1) requestCloseTab(tab); }}
-            title={tab.path}
-          >
-            <span class="text-xs shrink-0">{tab.isTmt ? "📜" : tab.isTypst ? "📐" : "📄"}</span>
-            <span class="truncate max-w-40 {tab.id === activeTabId ? 'font-medium' : ''}">{tab.title}</span>
-
-            {#if tab.isModified}
-              <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0 group-hover:hidden" title="変更あり"></span>
-            {/if}
-
-            <button
-              class="w-4 h-4 rounded hover:bg-stone-700 text-stone-400 hover:text-stone-200 flex items-center justify-center text-[10px] transition shrink-0 ml-0.5 cursor-pointer
-                {tab.isModified ? 'hidden group-hover:flex' : 'opacity-60 group-hover:opacity-100'}"
-              onclick={(e) => { e.stopPropagation(); requestCloseTab(tab); }}
-              title="タブを閉じる (Ctrl+W)"
-            >
-              ✕
-            </button>
-          </div>
-        {/each}
-      </div>
-
-      <!-- Quick Open button -->
-      <button
-        class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-stone-800/60 hover:bg-stone-800 text-stone-300 hover:text-stone-100 border border-stone-700/50 text-xs transition cursor-pointer shrink-0"
-        onclick={openQuickOpen}
-        title="ファイルを検索 / クイックオープン (Ctrl+P)"
-      >
-        <span class="text-xs">🔍</span>
-        <span class="text-[11px] hidden sm:inline text-stone-300">ファイル検索</span>
-        <kbd class="px-1.5 py-0.2 rounded bg-stone-900 border border-stone-700/60 text-[9px] font-mono text-stone-400">Ctrl+P</kbd>
-      </button>
-
-      <!-- Mode Switcher & Actions (Visible when a tab is open) -->
-      {#if activeTab}
-        <div class="flex items-center gap-2 shrink-0">
-          <!-- Mode Switcher -->
-          <div class="flex items-center bg-stone-950 p-0.5 rounded-lg border border-stone-800 text-xs">
-            <button
-              class="px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer {editMode === 'source' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
-              onclick={() => toggleMode('source')}
-              title="ソース編集: 生テキスト直接編集"
-            >
-              <span>📄</span>
-              <span class="text-[11px]">ソース</span>
-            </button>
-
-            {#if isTmtFile}
-              <button
-                class="px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer {editMode === 'hybrid' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
-                onclick={() => toggleMode('hybrid')}
-                title="ブロックハイブリッド編集"
-              >
-                <span>⚡</span>
-                <span class="text-[11px]">ハイブリッド</span>
-              </button>
-              <button
-                class="px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer {editMode === 'full' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
-                onclick={() => toggleMode('full')}
-                title="フルブロック (WYSIWYG) 編集"
-              >
-                <span>🎨</span>
-                <span class="text-[11px]">フルブロック</span>
-              </button>
-            {/if}
-
-            <button
-              class="px-2.5 py-1 rounded transition flex items-center gap-1 cursor-pointer {editMode === 'kanban' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium shadow-sm' : 'text-stone-400 hover:text-stone-200'}"
-              onclick={() => toggleMode('kanban')}
-              title="カンバンボード表示"
-            >
-              <span>📋</span>
-              <span class="text-[11px]">カンバン</span>
-            </button>
-          </div>
-
-          <!-- Save Button -->
-          <button
-            class="px-2.5 py-1 rounded-md bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700/60 transition flex items-center gap-1.5 cursor-pointer shrink-0"
-            onclick={saveCurrentDocument}
-            title="ドキュメントを保存 (Ctrl+S)"
-          >
-            <span>💾</span>
-            <span class="text-[11px]">保存</span>
-          </button>
-        </div>
-      {/if}
-    </header>
+    <WorkspaceHeader
+      {tabs}
+      activeId={activeTabId}
+      onselect={switchTab}
+      onclose={requestCloseTab}
+      onquickopen={openQuickOpen}
+      onmode={toggleMode}
+      onsave={saveCurrentDocument}
+    />
 
     {#if tabs.length === 0}
-      <!-- Empty Workspace State -->
-      <div class="flex-1 flex flex-col items-center justify-center text-center p-8 select-none text-stone-500">
-        <div class="w-16 h-16 rounded-2xl bg-stone-900/60 border border-stone-800 flex items-center justify-center text-3xl mb-4 shadow-xl">
-          📜
-        </div>
-        <h2 class="text-sm font-semibold text-stone-300 mb-1">開いているドキュメントがありません</h2>
-        <p class="text-xs text-stone-500 max-w-sm mb-6 leading-relaxed">
-          左側のエクスプローラーからファイルを選択して開くか、新しいファイルを作成してください。
-        </p>
-        <button
-          class="px-3 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-medium border border-stone-700/60 transition flex items-center gap-1.5 cursor-pointer"
-          onclick={() => startCreateFile(selectedDir || "")}
-        >
-          <span>📄</span>
-          <span>新しいファイルを作成</span>
-        </button>
-      </div>
+      <EmptyWorkspace oncreate={() => startCreateFile(selectedDir || "")} />
     {:else}
 
-    {#if isTmtFile}
-      <!-- Tomet Block Insert Bar -->
-      <div class="h-9 bg-stone-900/80 border-b border-stone-800/80 px-6 flex items-center justify-between text-xs shrink-0 select-none backdrop-blur-xs">
-        <div class="flex items-center gap-1.5 overflow-x-auto py-1">
-          <span class="text-[10px] font-bold text-stone-500 tracking-wider uppercase mr-1">Tomet ブロック:</span>
-          <button
-            class="px-2 py-0.5 rounded bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 hover:text-sky-200 border border-sky-500/30 flex items-center gap-1 transition cursor-pointer text-[11px]"
-            onclick={() => insertTometBlock('note')}
-            title="Note (補足・注記) コールアウトを挿入"
-          >
-            <span>💡</span>
-            <span>Note</span>
-          </button>
-          <button
-            class="px-2 py-0.5 rounded bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 flex items-center gap-1 transition cursor-pointer text-[11px]"
-            onclick={() => insertTometBlock('tip')}
-            title="Tip (ヒント) コールアウトを挿入"
-          >
-            <span>🚀</span>
-            <span>Tip</span>
-          </button>
-          <button
-            class="px-2 py-0.5 rounded bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 hover:text-amber-200 border border-amber-500/30 flex items-center gap-1 transition cursor-pointer text-[11px]"
-            onclick={() => insertTometBlock('warning')}
-            title="Warning (注意事項) コールアウトを挿入"
-          >
-            <span>⚠️</span>
-            <span>Warning</span>
-          </button>
-          <button
-            class="px-2 py-0.5 rounded bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-rose-200 border border-rose-500/30 flex items-center gap-1 transition cursor-pointer text-[11px]"
-            onclick={() => insertTometBlock('danger')}
-            title="Danger (重大・危険) コールアウトを挿入"
-          >
-            <span>🛑</span>
-            <span>Danger</span>
-          </button>
-          <button
-            class="px-2 py-0.5 rounded bg-stone-800/60 hover:bg-stone-700/60 text-stone-300 hover:text-stone-100 border border-stone-700 flex items-center gap-1 transition cursor-pointer text-[11px]"
-            onclick={() => insertTometBlock('code')}
-            title="コードブロック (code) を挿入"
-          >
-            <span>💻</span>
-            <span>Code Block</span>
-          </button>
-        </div>
+    {#if isTmtFile && editMode !== "kanban"}
+      <TometBlockBar metaId={docMeta.id} bind:metaOpen={isMetaCardExpanded} controls="meta-inspector" oninsert={insertTometBlock} />
 
-        <button
-          class="flex items-center gap-1.5 px-2.5 py-1 rounded bg-stone-800/40 hover:bg-stone-800 text-stone-300 hover:text-stone-100 text-[11px] border border-stone-700/50 transition cursor-pointer"
-          onclick={() => (isMetaCardExpanded = !isMetaCardExpanded)}
-          title="文書メタデータ・エクスポート設定パネルを開閉"
-        >
-          <span>📜</span>
-          <span>設定: {docMeta.id || '未設定'}</span>
-          <span class="text-[9px] text-stone-400">{isMetaCardExpanded ? '▲' : '▼'}</span>
-        </button>
-      </div>
-
-      <!-- Collapsible Document Meta / Config Inspector Card -->
       {#if isMetaCardExpanded}
-        <div class="bg-stone-900/90 border-b border-stone-800 px-6 py-3 text-xs space-y-3 backdrop-blur-md">
-          <div class="flex items-center justify-between border-b border-stone-800 pb-2">
-            <div class="flex items-center gap-2">
-              <button
-                class="px-2.5 py-1 rounded font-medium transition cursor-pointer {metaActiveTab === 'meta' ? 'bg-stone-800 text-stone-100 border border-stone-700' : 'text-stone-400 hover:text-stone-200'}"
-                onclick={() => (metaActiveTab = 'meta')}
-              >
-                ::meta (文書情報)
-              </button>
-              <button
-                class="px-2.5 py-1 rounded font-medium transition cursor-pointer {metaActiveTab === 'config' ? 'bg-stone-800 text-stone-100 border border-stone-700' : 'text-stone-400 hover:text-stone-200'}"
-                onclick={() => (metaActiveTab = 'config')}
-              >
-                ::config (エクスポート設定)
-              </button>
-            </div>
-
-            <button
-              class="px-3 py-1 rounded bg-sky-600 hover:bg-sky-500 text-white font-medium text-[11px] shadow-sm transition cursor-pointer flex items-center gap-1"
-              onclick={syncMetaToDocument}
-              title="変更したメタデータをドキュメント先頭に反映します"
-            >
-              <span>🔄</span>
-              <span>文書に反映</span>
-            </button>
-          </div>
-
-          {#if metaActiveTab === 'meta'}
-            <div class="grid grid-cols-3 gap-3">
-              <div>
-                <span class="text-stone-400 block text-[10px] mb-1 font-mono">id:</span>
-                <input
-                  type="text"
-                  bind:value={docMeta.id}
-                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 font-mono text-xs focus:outline-none focus:border-sky-500"
-                  placeholder="doc-id"
-                />
-              </div>
-              <div>
-                <span class="text-stone-400 block text-[10px] mb-1 font-mono">title:</span>
-                <input
-                  type="text"
-                  bind:value={docMeta.title}
-                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 text-xs focus:outline-none focus:border-sky-500"
-                  placeholder="ドキュメントのタイトル"
-                />
-              </div>
-              <div>
-                <span class="text-stone-400 block text-[10px] mb-1 font-mono">lang:</span>
-                <input
-                  type="text"
-                  bind:value={docMeta.lang}
-                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 font-mono text-xs focus:outline-none focus:border-sky-500"
-                  placeholder="ja / en"
-                />
-              </div>
-            </div>
-
-            <!-- Custom properties -->
-            <div class="pt-2 border-t border-stone-800/80 space-y-1.5">
-              <span class="text-[10px] font-semibold text-stone-400 uppercase tracking-wider block">カスタム属性:</span>
-              <div class="space-y-1">
-                {#each Object.entries(docMeta.custom) as [k, v] (k)}
-                  <div class="flex items-center gap-2">
-                    <span class="font-mono text-stone-300 w-28 truncate text-[11px]">{k}:</span>
-                    <input
-                      type="text"
-                      bind:value={docMeta.custom[k]}
-                      class="flex-1 bg-stone-950 border border-stone-800 rounded px-2 py-0.5 text-stone-200 text-xs focus:outline-none focus:border-stone-600"
-                    />
-                    <button
-                      class="px-2 py-0.5 text-stone-500 hover:text-red-400 transition cursor-pointer text-xs"
-                      onclick={() => removeCustomMetaField(k)}
-                      title="属性を削除"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                {/each}
-              </div>
-
-              <!-- Add custom attribute row -->
-              <div class="flex items-center gap-2 pt-1">
-                <input
-                  type="text"
-                  bind:value={newCustomKey}
-                  placeholder="新しいキー (例: author)"
-                  class="w-36 bg-stone-950 border border-stone-800 rounded px-2 py-0.5 text-stone-300 font-mono text-[11px] focus:outline-none focus:border-sky-500"
-                />
-                <input
-                  type="text"
-                  bind:value={newCustomValue}
-                  placeholder="値"
-                  class="flex-1 bg-stone-950 border border-stone-800 rounded px-2 py-0.5 text-stone-300 text-[11px] focus:outline-none focus:border-sky-500"
-                  onkeydown={(e) => { if (e.key === 'Enter') addCustomMetaField(); }}
-                />
-                <button
-                  class="px-2.5 py-0.5 rounded bg-stone-800 hover:bg-stone-700 text-stone-200 text-[11px] transition cursor-pointer"
-                  onclick={addCustomMetaField}
-                >
-                  ＋ 追加
-                </button>
-              </div>
-            </div>
-          {:else}
-            <!-- Config Tab -->
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <span class="text-stone-400 block text-[10px] mb-1 font-mono">export.type:</span>
-                <input
-                  type="text"
-                  bind:value={docConfig.export_type}
-                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 font-mono text-xs focus:outline-none focus:border-sky-500"
-                  placeholder="commonmark"
-                />
-              </div>
-              <div>
-                <span class="text-stone-400 block text-[10px] mb-1 font-mono">export.path:</span>
-                <input
-                  type="text"
-                  bind:value={docConfig.export_path}
-                  class="w-full bg-stone-950 border border-stone-700 rounded px-2.5 py-1 text-stone-100 font-mono text-xs focus:outline-none focus:border-sky-500"
-                  placeholder="README.md"
-                />
-              </div>
-            </div>
-          {/if}
-        </div>
+        <MetaInspector id="meta-inspector" bind:meta={docMeta} bind:config={docConfig} onapply={syncMetaToDocument} />
       {/if}
     {/if}
 
@@ -1810,47 +970,46 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
           content={rawTextContent}
           path={activePath}
           language={sourceLanguage(activePath)}
-          extensions={sourceExtras}
+          extensions={sourceEditingExtensions}
           onChange={handleSourceChange}
-          onSave={saveCurrentDocument}
         />
       </div>
     {:else}
       <!-- CodeMirror 6 Source Text Editor (Active when editMode === 'source') -->
       <div class="flex-1 overflow-hidden relative" class:hidden={editMode !== 'source'}>
-      <div class="h-full w-full overflow-hidden bg-stone-950 select-text">
+      <div class="h-full w-full overflow-hidden bg-tln-content select-text">
         <CodeEditor
+          variant="bare"
           label="ソース"
           content={rawTextContent}
           language={sourceLanguage(activePath)}
-          extensions={sourceExtras}
+          extensions={sourceEditingExtensions}
           onChange={handleSourceChange}
-          onSave={saveCurrentDocument}
         />
       </div>
     </div>
 
-    <!-- Tiptap WYSIWYG / Hybrid Editor (Active when editMode === 'hybrid' || editMode === 'full') -->
-    <div
-      class="flex-1 overflow-y-auto px-10 py-8 {editMode === 'hybrid' ? 'mode-hybrid' : 'mode-full'}"
-      class:hidden={editMode !== 'hybrid' && editMode !== 'full'}
-    >
-      <div class="max-w-3xl mx-auto">
-
-        <!-- Mode Indicator Banner -->
-        <div class="mb-4 px-3 py-1.5 rounded-md text-[11px] flex items-center gap-2 border {editMode === 'hybrid' ? 'bg-amber-950/20 text-amber-300 border-amber-900/40' : 'bg-emerald-950/20 text-emerald-300 border-emerald-900/40'}">
-          <span>{editMode === 'hybrid' ? '⚡' : '🎨'}</span>
-          <span>
-            {editMode === 'hybrid'
-              ? 'ブロックハイブリッドモード: 見出しに Tomet 構文記号（=[ ]=）が美しく添えられ、構造を意識したハイブリッド執筆が可能です。'
-              : 'フルブロックモード (WYSIWYG): 構文記号を完全に隠し、モダンなリッチテキストとして見たまま執筆できます。'}
-          </span>
+    <!-- Block editor (Active when editMode === 'hybrid' || editMode === 'full'): the document of the tab is its pmDoc -->
+    {#if isBlockMode && activeTab}
+      <div class="flex-1 min-h-0 flex flex-col bg-tln-content select-text">
+        <div class="shrink-0 p-3">
+          <ModeBanner mode={editMode === "hybrid" ? "hybrid" : "full"} />
         </div>
-
-        <!-- Tiptap Editor Canvas -->
-        <div bind:this={editorElement} class="tiptap-editor cursor-text selection:bg-stone-800 select-text"></div>
+        <div class="flex-1 min-h-0">
+          <!-- One editor for each tab, so that undo cannot reach into the document of another tab. -->
+          {#key activeTabId}
+            <RichText
+              bind:content={() => activeTab?.pmDoc ?? null, (doc) => activeTab && (activeTab.pmDoc = doc)}
+              bind:editor
+              variant="bare"
+              label="ブロックエディタ"
+              extensions={[Callout, HeadingMarkers]}
+              onChange={() => activeTab && (activeTab.isModified = true)}
+            />
+          {/key}
+        </div>
       </div>
-    </div>
+    {/if}
 
     <!-- Kanban Board View (Active when editMode === 'kanban') -->
     {#if editMode === 'kanban'}
@@ -1880,222 +1039,33 @@ Ordiola は Tomet 言語のためのワークスペース型デスクトップ�
   {/snippet}
   </SplitPane>
 
-  <!-- Context Menu Overlay -->
-  {#if contextMenu && contextMenu.visible}
-    <!-- Invisible full screen backdrop to dismiss menu on click -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="fixed inset-0 z-50 cursor-default"
-      onclick={closeContextMenu}
-      oncontextmenu={(e) => {
-        e.preventDefault();
-        closeContextMenu();
-      }}
-    ></div>
-
-    <!-- Popover -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="fixed z-50 min-w-44 bg-stone-900/95 border border-stone-700/80 rounded-lg shadow-2xl py-1 text-xs text-stone-200 backdrop-blur-md"
-      style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
-      onclick={(e) => e.stopPropagation()}
-    >
-      {#if contextMenu.entry}
-        <div class="px-2.5 py-1 text-[10px] font-mono text-stone-400 truncate border-b border-stone-800 mb-1 max-w-56">
-          {contextMenu.entry.name}
-        </div>
-
-        {#if contextMenu.entry.is_dir}
-          <button
-            class="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-stone-800 text-stone-200 hover:text-stone-100 transition text-left cursor-pointer"
-            onclick={() => {
-              const p = contextMenu?.entry?.relative_path || "";
-              closeContextMenu();
-              startCreateFile(p);
-            }}
-          >
-            <span class="text-xs">📄</span>
-            <span>新しいファイル...</span>
-          </button>
-          <button
-            class="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-stone-800 text-stone-200 hover:text-stone-100 transition text-left cursor-pointer"
-            onclick={() => {
-              const p = contextMenu?.entry?.relative_path || "";
-              closeContextMenu();
-              startCreateFolder(p);
-            }}
-          >
-            <span class="text-xs">📁</span>
-            <span>新しいフォルダ...</span>
-          </button>
-          <div class="my-1 border-t border-stone-800"></div>
-        {/if}
-
-        <button
-          class="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-stone-800 text-stone-200 hover:text-stone-100 transition text-left cursor-pointer"
-          onclick={() => {
-            const ent = contextMenu?.entry;
-            closeContextMenu();
-            if (ent) startRename(ent);
-          }}
-        >
-          <span class="text-xs">✏️</span>
-          <span>名前の変更 (F2)</span>
-        </button>
-
-        <div class="my-1 border-t border-stone-800"></div>
-
-        <button
-          class="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-red-950/40 text-red-400 hover:text-red-300 transition text-left cursor-pointer"
-          onclick={() => {
-            const ent = contextMenu?.entry;
-            closeContextMenu();
-            if (ent) confirmDelete(ent);
-          }}
-        >
-          <span class="text-xs">🗑️</span>
-          <span>削除... (Delete)</span>
-        </button>
-      {:else}
-        <button
-          class="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-stone-800 text-stone-200 hover:text-stone-100 transition text-left cursor-pointer"
-          onclick={() => {
-            closeContextMenu();
-            startCreateFile("");
-          }}
-        >
-          <span class="text-xs">📄</span>
-          <span>新しいファイル...</span>
-        </button>
-        <button
-          class="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-stone-800 text-stone-200 hover:text-stone-100 transition text-left cursor-pointer"
-          onclick={() => {
-            closeContextMenu();
-            startCreateFolder("");
-          }}
-        >
-          <span class="text-xs">📁</span>
-          <span>新しいフォルダ...</span>
-        </button>
-        <div class="my-1 border-t border-stone-800"></div>
-        <button
-          class="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-stone-800 text-stone-200 hover:text-stone-100 transition text-left cursor-pointer"
-          onclick={() => {
-            closeContextMenu();
-            collapseAll();
-          }}
-        >
-          <span class="text-xs">📂</span>
-          <span>すべて折りたたむ</span>
-        </button>
-        <button
-          class="w-full flex items-center gap-2 px-2.5 py-1.5 hover:bg-stone-800 text-stone-200 hover:text-stone-100 transition text-left cursor-pointer"
-          onclick={() => {
-            closeContextMenu();
-            refreshWorkspace();
-          }}
-        >
-          <span class="text-xs">🔄</span>
-          <span>エクスプローラー更新</span>
-        </button>
-      {/if}
-    </div>
-  {/if}
-
   {#if deleteConfirmModal && deleteConfirmModal.visible}
     <ConfirmDelete
       entry={deleteConfirmModal.entry}
-      onConfirm={executeDelete}
-      onCancel={() => (deleteConfirmModal = null)}
+      onconfirm={executeDelete}
+      oncancel={() => (deleteConfirmModal = null)}
     />
   {/if}
 
   {#if closeConfirmTab}
-    <ConfirmUnsaved
-      title={closeConfirmTab.title}
-      onSave={() => saveAndCloseTab(closeConfirmTab!)}
-      onDiscard={() => executeCloseTab(closeConfirmTab!)}
-      onCancel={() => (closeConfirmTab = null)}
+    {@const tab = closeConfirmTab}
+    {#snippet unsavedMessage()}
+      「<code class="font-tln-mono">{tab.title}</code>」への変更を保存しますか？
+    {/snippet}
+    <ConfirmDialog
+      open
+      tone="warn"
+      title="変更が保存されていません"
+      message={unsavedMessage}
+      confirm="保存する"
+      alternative="保存しない"
+      alternativeVariant="danger"
+      cancel="キャンセル"
+      onconfirm={() => saveAndCloseTab(tab)}
+      onalternative={() => executeCloseTab(tab)}
+      oncancel={() => (closeConfirmTab = null)}
     />
   {/if}
 
-  <!-- Quick Open / Fuzzy Finder Modal -->
-  {#if isQuickOpenOpen}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start justify-center pt-20 px-4"
-      onclick={closeQuickOpen}
-    >
-      <div
-        class="bg-stone-900 border border-stone-700 rounded-xl shadow-2xl max-w-xl w-full overflow-hidden flex flex-col text-xs space-y-0"
-        onclick={(e) => e.stopPropagation()}
-      >
-        <!-- Search Input Bar -->
-        <div class="flex items-center gap-2 px-3.5 py-3 border-b border-stone-800 bg-stone-950/50">
-          <span class="text-stone-400 text-sm">🔍</span>
-          <input
-            bind:this={quickOpenInputEl}
-            type="text"
-            bind:value={quickOpenQuery}
-            placeholder="ファイルを検索... (矢印キーで選択, Enterで決定)"
-            class="flex-1 bg-transparent text-stone-100 placeholder-stone-500 text-sm focus:outline-none font-mono"
-            onkeydown={handleQuickOpenKeydown}
-          />
-          <kbd class="px-1.5 py-0.5 rounded bg-stone-800 border border-stone-700 text-[10px] font-mono text-stone-400">ESC</kbd>
-        </div>
-
-        <!-- Search Results List -->
-        <div class="max-h-96 overflow-y-auto p-1.5 space-y-0.5">
-          {#if filteredQuickOpenFiles.length === 0}
-            <div class="p-6 text-center text-stone-500 italic text-xs font-mono">
-              一致するファイルが見つかりません
-            </div>
-          {:else}
-            {#each filteredQuickOpenFiles as file, index (file.relative_path || file.path)}
-              <div
-                class="flex items-center justify-between px-3 py-2 rounded-lg transition cursor-pointer {index === quickOpenSelectedIndex ? 'bg-sky-500/20 text-sky-100 border border-sky-500/40' : 'text-stone-300 hover:bg-stone-800/80 border border-transparent'}"
-                onclick={() => {
-                  closeQuickOpen();
-                  openDocument(file.relative_path || file.path);
-                }}
-                onmouseenter={() => (quickOpenSelectedIndex = index)}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => { if (e.key === 'Enter') { closeQuickOpen(); openDocument(file.relative_path || file.path); } }}
-              >
-                <div class="flex items-center gap-2.5 min-w-0 flex-1">
-                  <span class="text-sm shrink-0">
-                    {file.name.endsWith('.tmt') ? '📜' : file.name.endsWith('.toml') ? '⚙️' : '📄'}
-                  </span>
-                  <div class="min-w-0 flex-1">
-                    <div class="font-medium text-xs truncate">
-                      {file.name}
-                    </div>
-                    <div class="text-[10px] font-mono text-stone-400 truncate">
-                      {file.relative_path}
-                    </div>
-                  </div>
-                </div>
-
-                {#if index === quickOpenSelectedIndex}
-                  <span class="text-[10px] text-sky-400 shrink-0 font-mono">
-                    Enter で開く ↵
-                  </span>
-                {/if}
-              </div>
-            {/each}
-          {/if}
-        </div>
-
-        <!-- Footer status -->
-        <div class="px-3.5 py-1.5 bg-stone-950 border-t border-stone-800/80 flex items-center justify-between text-[10px] text-stone-500 font-mono">
-          <span>{filteredQuickOpenFiles.length} 件のファイル</span>
-          <span>↑↓ 移動 ・ ↵ 選択 ・ ESC 閉じる</span>
-        </div>
-      </div>
-    </div>
-  {/if}
+  <QuickOpen bind:open={isQuickOpenOpen} files={allWorkspaceFiles} onopen={openDocument} />
 </div>

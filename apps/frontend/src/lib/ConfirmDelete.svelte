@@ -1,56 +1,44 @@
 <script lang="ts">
-  // The delete confirmation, built on @telaion/primitives.
-  import { Alert, Button, Icon, Modal } from "@telaion/primitives";
-  import { TriangleAlert } from "@telaion/primitives/icons";
+  // Deleting a file or a folder. What is ordiola's own here is the wording and the extra warning for a
+  // folder; the dialog, its tone and the safe focus are ConfirmDialog's.
+  import { Alert, ConfirmDialog } from "@telaion/primitives";
 
   let {
     entry,
-    onConfirm,
-    onCancel,
+    onconfirm,
+    oncancel,
   }: {
     entry: { name: string; is_dir: boolean };
-    onConfirm: () => void;
-    onCancel: () => void;
+    onconfirm: () => void;
+    oncancel: () => void;
   } = $props();
 </script>
 
-<Modal open title={entry.is_dir ? "フォルダの削除" : "ファイルの削除"} size="sm" onclose={onCancel}>
-  <div class="message">
-    <span class="mark"><Icon icon={TriangleAlert} /></span>
-    <p>「<code>{entry.name}</code>」を削除してもよろしいですか？</p>
-  </div>
+{#snippet message()}
+  <p>「<code>{entry.name}</code>」を削除してもよろしいですか？</p>
   {#if entry.is_dir}
     <Alert tone="warn">フォルダ内のすべてのファイルおよびサブフォルダも完全に削除されます。</Alert>
   {/if}
-  {#snippet footer()}
-    <!-- Cancel takes the focus first: the safe answer is the default one. -->
-    <Button autofocus onclick={onCancel}>キャンセル</Button>
-    <Button variant="danger-fill" onclick={onConfirm}>削除</Button>
-  {/snippet}
-</Modal>
+{/snippet}
+
+<ConfirmDialog
+  open
+  destructive
+  title={entry.is_dir ? "フォルダの削除" : "ファイルの削除"}
+  {message}
+  confirm="削除"
+  cancel="キャンセル"
+  {onconfirm}
+  {oncancel}
+/>
 
 <style>
-  .message {
-    display: flex;
-    align-items: flex-start;
-    gap: calc(var(--tln-space) * 3);
-    margin-bottom: calc(var(--tln-space) * 3);
-  }
-
-  .mark {
-    display: inline-flex;
-    padding: calc(var(--tln-space) * 2);
-    font-size: var(--tln-text-md);
-    color: var(--tln-danger);
-    background: var(--tln-danger-soft);
-    border: 1px solid var(--tln-danger);
-    border-radius: var(--tln-radius);
-  }
-
   p {
     margin: 0;
-    min-width: 0;
-    overflow-wrap: anywhere;
+  }
+
+  p + :global(*) {
+    margin-top: calc(var(--tln-space) * 3);
   }
 
   code {

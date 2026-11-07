@@ -5,8 +5,9 @@ export interface FileEntry {
   is_dir: boolean;
   extension?: string | null;
   has_children: boolean;
+  /** The entries inside a directory; not set until the directory has been listed. */
   children?: FileEntry[] | null;
-  isExpanded?: boolean;
+  /** The directory is being listed. */
   isLoading?: boolean;
 }
 
@@ -20,19 +21,6 @@ export interface VaultState {
   current_path: string;
   current_name: string;
   recent_vaults: VaultEntry[];
-}
-
-export interface InlineAction {
-  type: "new-file" | "new-folder" | "rename";
-  parentPath: string; // relative path of parent dir ("" for root)
-  targetEntry?: FileEntry; // the entry being renamed
-}
-
-export interface ContextMenuState {
-  visible: boolean;
-  x: number;
-  y: number;
-  entry: FileEntry | null; // null represents background context menu
 }
 
 export interface DeleteConfirmState {
@@ -53,3 +41,17 @@ export interface EditorTab {
 }
 
 
+
+/** The `::meta` of a Tomet document, as the metadata inspector edits it. */
+export interface TometDocMeta {
+  id: string;
+  title: string;
+  lang: string;
+  custom: Record<string, string>;
+}
+
+/** The `::config` of a Tomet document, as the metadata inspector edits it. */
+export interface TometDocConfig {
+  export_type: string;
+  export_path: string;
+}
