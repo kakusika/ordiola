@@ -1,15 +1,13 @@
-::config(
-  export: {
-    type: commonmark,
-    path: "README.md"
-  }
+::export(
+  type: commonmark
+  path: "README.md"
 )
-::meta{
-  id: doc-readme,
+::id(doc-readme)
+::meta(
   lang: en
-}
+)
 
-${macro.generated_by(self.path)}
+$macro.generated_by(self::path)
 
 =[ Ordiola ]
 
@@ -46,14 +44,14 @@ If you are looking for a stable, well-supported editor, I recommend Obsidian (ht
 ===[ Using Nix Flake ]
 
 ```bash
-direnv allow
-# or
-nix develop
+`` direnv allow
+`` # or
+`` nix develop
 ```
 
 ===[ Running Locally ]
 
 ```bash
-just frontend-install
-just dev
+`` just frontend-install
+`` just dev
 ```

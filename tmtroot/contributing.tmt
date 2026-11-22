@@ -1,15 +1,13 @@
-::config(
-  export: {
-    type: commonmark,
-    path: "CONTRIBUTING.md"
-  }
+::export(
+  type: commonmark
+  path: "CONTRIBUTING.md"
 )
-::meta{
-  id: doc-contributing,
+::id(doc-contributing)
+::meta(
   lang: en
-}
+)
 
-${macro.generated_by(self.path)}
+$macro.generated_by(self::path)
 
 =[ Contributing to Ordiola ]
 

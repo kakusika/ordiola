@@ -40,8 +40,6 @@ export interface EditorTab {
   editMode: "source" | "hybrid" | "full" | "kanban";
 }
 
-
-
 /** The `::meta` of a Tomet document, as the metadata inspector edits it. */
 export interface TometDocMeta {
   id: string;

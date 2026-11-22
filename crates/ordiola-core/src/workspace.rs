@@ -172,7 +172,11 @@ pub fn list_all_files(vault_root: &Path) -> std::io::Result<Vec<FileEntry>> {
         });
     }
 
-    files.sort_by(|a, b| a.relative_path.to_lowercase().cmp(&b.relative_path.to_lowercase()));
+    files.sort_by(|a, b| {
+        a.relative_path
+            .to_lowercase()
+            .cmp(&b.relative_path.to_lowercase())
+    });
     Ok(files)
 }
 
@@ -413,12 +417,17 @@ pub fn move_entry(
     if !dest_dir_full.is_dir() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotADirectory,
-            format!("移動先がディレクトリではありません: {}", dest_dir_full.display()),
+            format!(
+                "移動先がディレクトリではありません: {}",
+                dest_dir_full.display()
+            ),
         ));
     }
 
     // Security & sanity check: Cannot move directory into itself or into its own descendant
-    if source_full.is_dir() && (dest_dir_full == source_full || dest_dir_full.starts_with(&source_full)) {
+    if source_full.is_dir()
+        && (dest_dir_full == source_full || dest_dir_full.starts_with(&source_full))
+    {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "ディレクトリを自身またはその配下のディレクトリに移動することはできません",

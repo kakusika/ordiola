@@ -1,9 +1,9 @@
-use std::path::Path;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
+use typst::WorldExt;
 use typst::diag::{Severity, SourceDiagnostic};
 use typst_layout::PagedDocument;
-use typst::WorldExt;
-use typst_svg::{svg, SvgOptions};
+use typst_svg::{SvgOptions, svg};
 
 use crate::world::TypstWorld;
 
@@ -79,8 +79,8 @@ pub fn export_pdf(
 
     match warned.output {
         Ok(document) => {
-            let pdf_bytes = typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default())
-                .map_err(|errs| {
+            let pdf_bytes =
+                typst_pdf::pdf(&document, &typst_pdf::PdfOptions::default()).map_err(|errs| {
                     errs.into_iter()
                         .map(|e| e.message.to_string())
                         .collect::<Vec<_>>()

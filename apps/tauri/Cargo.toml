@@ -1,6 +1,6 @@
 [package]
-name = "ordiola-tauri"
-default-run = "ordiola"
+name              = "ordiola-tauri"
+default-run       = "ordiola"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,22 +10,22 @@ name = "ordiola"
 path = "./src/main.rs"
 
 [lib]
-name = "ordiola_lib"
+name       = "ordiola_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { workspace = true }
 
 [dependencies]
-ordiola-core = { workspace = true }
-ordiola-config = { workspace = true }
+ordiola-config    = { workspace = true }
+ordiola-core      = { workspace = true }
 ordiola-ext-typst = { workspace = true }
 #--- Crates.io ---
-anyhow = { workspace = true }
-notify = { workspace = true }
-rfd = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tauri = { workspace = true }
-tauri-runtime-wry = { workspace = true }
+anyhow              = { workspace = true }
+notify              = { workspace = true }
+rfd                 = { workspace = true }
+serde               = { workspace = true }
+serde_json          = { workspace = true }
+tauri               = { workspace = true }
 tauri-plugin-opener = { workspace = true }
+tauri-runtime-wry   = { workspace = true }

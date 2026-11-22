@@ -106,8 +106,7 @@ impl World for TypstWorld {
         }
 
         let path = self.resolve_file_id(id)?;
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| FileError::from_io(e, &path))?;
+        let content = std::fs::read_to_string(&path).map_err(|e| FileError::from_io(e, &path))?;
         let src = Source::new(id, content);
         cache.insert(id, Ok(src.clone()));
         Ok(src)
@@ -124,8 +123,7 @@ impl World for TypstWorld {
         }
 
         let path = self.resolve_file_id(id)?;
-        let data = std::fs::read(&path)
-            .map_err(|e| FileError::from_io(e, &path))?;
+        let data = std::fs::read(&path).map_err(|e| FileError::from_io(e, &path))?;
         let bytes = Bytes::new(data);
         cache.insert(id, Ok(bytes.clone()));
         Ok(bytes)

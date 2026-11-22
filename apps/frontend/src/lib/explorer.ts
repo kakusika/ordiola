@@ -35,11 +35,18 @@ export function pathChain(dir: string): string[] {
 }
 
 /** The entry at `path` among the loaded entries, or `null`. */
-export function findEntry(entries: FileEntry[], path: string | null): FileEntry | null {
+export function findEntry(
+  entries: FileEntry[],
+  path: string | null,
+): FileEntry | null {
   if (!path) return null;
   for (const entry of entries) {
     if (entryPath(entry) === path) return entry;
-    if (entry.is_dir && entry.children && path.startsWith(entryPath(entry) + "/")) {
+    if (
+      entry.is_dir &&
+      entry.children &&
+      path.startsWith(entryPath(entry) + "/")
+    ) {
       const found = findEntry(entry.children, path);
       if (found) return found;
     }
@@ -50,7 +57,10 @@ export function findEntry(entries: FileEntry[], path: string | null): FileEntry 
 /**
  * The entries inside a directory (`""` is the vault root), or `null` when they are not loaded yet.
  */
-export function childrenOf(entries: FileEntry[], dir: string): FileEntry[] | null {
+export function childrenOf(
+  entries: FileEntry[],
+  dir: string,
+): FileEntry[] | null {
   if (!dir || dir === ".") return entries;
   return findEntry(entries, dir)?.children ?? null;
 }
@@ -59,10 +69,15 @@ export function childrenOf(entries: FileEntry[], dir: string): FileEntry[] | nul
  * Where a new file or folder goes when the person did not say: inside the selected directory, or
  * beside the selected file, else at the root.
  */
-export function creationDir(entries: FileEntry[], selectedPath: string | null): string {
+export function creationDir(
+  entries: FileEntry[],
+  selectedPath: string | null,
+): string {
   const selected = findEntry(entries, selectedPath);
   if (!selected) return "";
-  return selected.is_dir ? entryPath(selected) : parentPath(entryPath(selected));
+  return selected.is_dir
+    ? entryPath(selected)
+    : parentPath(entryPath(selected));
 }
 
 /** The path of `path` after the entry at `from` was moved to `to`; unchanged when it is not inside. */
@@ -75,12 +90,19 @@ export function remapPath(path: string, from: string, to: string): string {
 // Without Tauri there is no file system, and the tree is a plain list of entries. These keep it
 // behaving like one, so that creating, renaming and moving can be tried in a browser.
 
-export function mockInsert(entries: FileEntry[], dir: string, entry: FileEntry): void {
+export function mockInsert(
+  entries: FileEntry[],
+  dir: string,
+  entry: FileEntry,
+): void {
   const target = childrenOf(entries, dir);
   if (target) target.push(entry);
 }
 
-export function mockDetach(entries: FileEntry[], path: string): FileEntry | null {
+export function mockDetach(
+  entries: FileEntry[],
+  path: string,
+): FileEntry | null {
   const list = childrenOf(entries, parentPath(path));
   const at = list?.findIndex((entry) => entryPath(entry) === path) ?? -1;
   return list && at >= 0 ? list.splice(at, 1)[0] : null;
@@ -89,6 +111,8 @@ export function mockDetach(entries: FileEntry[], path: string): FileEntry | null
 /** Gives an entry and everything inside it the path it has after it moved from `from` to `to`. */
 export function mockRelocate(entry: FileEntry, from: string, to: string): void {
   entry.relative_path = entry.path = remapPath(entryPath(entry), from, to);
-  entry.name = entry.relative_path.substring(entry.relative_path.lastIndexOf("/") + 1);
+  entry.name = entry.relative_path.substring(
+    entry.relative_path.lastIndexOf("/") + 1,
+  );
   for (const child of entry.children ?? []) mockRelocate(child, from, to);
 }

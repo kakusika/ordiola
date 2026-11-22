@@ -1,9 +1,9 @@
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+use ordiola_config::{AppConfig, VaultEntry};
+use ordiola_core::{FileEntry, ProseMirrorDoc, prosemirror_to_tomet, tomet_to_prosemirror};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, State};
-use ordiola_config::{AppConfig, VaultEntry};
-use ordiola_core::{FileEntry, ProseMirrorDoc, prosemirror_to_tomet, tomet_to_prosemirror};
 
 /// Global application state managed by Tauri
 pub struct AppState {
@@ -276,12 +276,7 @@ fn export_typst_pdf(
     let vault_root = state.current_vault.lock().map_err(|e| e.to_string())?;
     let out = ordiola_core::resolve_in_vault(&vault_root, Path::new(&output_path))
         .unwrap_or_else(|_| PathBuf::from(&output_path));
-    ordiola_ext_typst::export_pdf(
-        &source,
-        relative_path.as_deref(),
-        Some(&vault_root),
-        &out,
-    )
+    ordiola_ext_typst::export_pdf(&source, relative_path.as_deref(), Some(&vault_root), &out)
 }
 
 fn resolve_document_path(path: &str, state: &State<'_, AppState>) -> Result<PathBuf, String> {

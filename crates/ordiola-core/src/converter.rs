@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tomet_ast::{
-    Block, Document, Element, Inline, List, ListItem, Name, Paragraph, RawText, Section, Sigil,
-    Span, Text,
+    Block, Data, Declaration, Element, Entry, File, Inline, List, ListItem, Name, Paragraph,
+    Placement, RawText, Section, Text, Tuple, Value,
 };
+use tomet_span::Span;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TometMetadata {
@@ -20,27 +21,66 @@ pub struct TometConfig {
     pub export_path: Option<String>,
 }
 
-/// Extract metadata fields from a Tomet document string (e.g. `::meta{ id: foo, lang: ja }`)
+fn scalar_text(value: &Value) -> Option<String> {
+    value
+        .as_scalar()
+        .and_then(|s| s.text())
+        .map(|s| s.into_owned())
+}
+
+fn extract_meta_from_tuple(tuple: &Tuple, meta: &mut TometMetadata) {
+    for entry in tuple {
+        let Some(key) = entry.name() else { continue };
+        let Some(val) = scalar_text(entry.value()) else {
+            continue;
+        };
+        match key {
+            "id" => meta.id = Some(val),
+            "title" => meta.title = Some(val),
+            "lang" => meta.lang = Some(val),
+            _ if !key.is_empty() => {
+                meta.custom.insert(key.to_string(), val);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Extract metadata fields from a Tomet document's header declarations (`::id(...)`, `::meta(...)`).
 pub fn extract_tomet_metadata(source: &str) -> TometMetadata {
     let mut meta = TometMetadata::default();
-    if let Some(start) = source.find("::meta") {
-        if let Some(open) = source[start..].find('{') {
-            let body_start = start + open + 1;
-            if let Some(close) = source[body_start..].find('}') {
-                let body = &source[body_start..body_start + close];
-                for line in body.lines() {
-                    let trimmed = line.trim().trim_end_matches(',');
-                    if let Some((k, v)) = trimmed.split_once(':') {
-                        let key = k.trim().to_string();
-                        let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
-                        match key.as_str() {
-                            "id" => meta.id = Some(val),
-                            "title" => meta.title = Some(val),
-                            "lang" => meta.lang = Some(val),
-                            _ if !key.is_empty() => {
-                                meta.custom.insert(key, val);
+    let Ok(file) = tomet_ast_parser::parse_file(source) else {
+        return meta;
+    };
+
+    for decl in &file.header {
+        if decl.name.is_bare_named("id") {
+            if let Some(val) = decl
+                .data
+                .args
+                .as_ref()
+                .and_then(|a| a.get("0"))
+                .and_then(scalar_text)
+            {
+                meta.id = Some(val);
+            }
+        } else if decl.name.is_bare_named("meta") {
+            if let Some(ref args) = decl.data.args {
+                extract_meta_from_tuple(args, &mut meta);
+            }
+            if let Some(ref group) = decl.data.value {
+                for entry in &group.0 {
+                    if let Entry::Pair(key, value) = entry {
+                        if let Some(val) = scalar_text(value) {
+                            match key.as_str() {
+                                "id" => meta.id = Some(val),
+                                "title" => meta.title = Some(val),
+                                "lang" => meta.lang = Some(val),
+                                _ if !key.is_empty() => {
+                                    meta.custom.insert(key.clone(), val);
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
                     }
                 }
@@ -50,63 +90,118 @@ pub fn extract_tomet_metadata(source: &str) -> TometMetadata {
     meta
 }
 
-/// Inject or replace the `::meta` block in a Tomet document string
-pub fn inject_tomet_metadata(source: &str, meta: &TometMetadata) -> String {
-    let mut meta_lines = Vec::new();
-    meta_lines.push("::meta{".to_string());
-    if let Some(ref id) = meta.id {
-        meta_lines.push(format!("  id: {id},"));
+fn format_meta_declaration(meta: &TometMetadata) -> Option<String> {
+    if meta.title.is_none() && meta.lang.is_none() && meta.custom.is_empty() {
+        return None;
     }
+    let mut lines = vec!["::meta(".to_string()];
     if let Some(ref title) = meta.title {
-        meta_lines.push(format!("  title: \"{title}\","));
+        let escaped = title.replace('\\', "\\\\").replace('"', "\\\"");
+        lines.push(format!("  title: \"{escaped}\""));
     }
     if let Some(ref lang) = meta.lang {
-        meta_lines.push(format!("  lang: {lang},"));
+        lines.push(format!("  lang: {lang}"));
     }
     for (k, v) in &meta.custom {
-        meta_lines.push(format!("  {k}: \"{v}\","));
+        let escaped = v.replace('\\', "\\\\").replace('"', "\\\"");
+        lines.push(format!("  {k}: \"{escaped}\""));
     }
-    meta_lines.push("}".to_string());
-    let new_meta_block = meta_lines.join("\n");
+    lines.push(")".to_string());
+    Some(lines.join("\n"))
+}
 
-    if let Some(start) = source.find("::meta") {
-        if let Some(open) = source[start..].find('{') {
-            let body_start = start + open + 1;
-            if let Some(close) = source[body_start..].find('}') {
-                let end = body_start + close + 1;
-                let mut res = String::new();
-                res.push_str(&source[..start]);
-                res.push_str(&new_meta_block);
-                res.push_str(&source[end..]);
-                return res;
-            }
+fn find_header_decl<'a>(header: &'a [Declaration], name: &str) -> Option<&'a Declaration> {
+    header.iter().find(|d| d.name.is_bare_named(name))
+}
+
+/// Inject or replace the `::id(...)` and `::meta(...)` declarations in a Tomet document string.
+pub fn inject_tomet_metadata(source: &str, meta: &TometMetadata) -> String {
+    let id_block = meta.id.as_ref().map(|id| format!("::id({id})"));
+    let meta_block = format_meta_declaration(meta);
+
+    let Ok(file) = tomet_ast_parser::parse_file(source) else {
+        let mut prefix = Vec::new();
+        if let Some(id_str) = id_block {
+            prefix.push(id_str);
+        }
+        if let Some(meta_str) = meta_block {
+            prefix.push(meta_str);
+        }
+        if prefix.is_empty() {
+            return source.to_string();
+        }
+        return format!("{}\n\n{source}", prefix.join("\n"));
+    };
+
+    let existing_id = find_header_decl(&file.header, "id");
+    let existing_meta = find_header_decl(&file.header, "meta");
+
+    // Collect (start, end, replacement) edits in source order, then apply from back to front.
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    let mut to_append: Vec<String> = Vec::new();
+
+    match (existing_id, id_block) {
+        (Some(decl), Some(rep)) => edits.push((decl.span.start, decl.span.end, rep)),
+        (Some(decl), None) => {
+            let end = if source.as_bytes().get(decl.span.end) == Some(&b'\n') {
+                decl.span.end + 1
+            } else {
+                decl.span.end
+            };
+            edits.push((decl.span.start, end, String::new()));
+        }
+        (None, Some(rep)) => to_append.push(rep),
+        (None, None) => {}
+    }
+
+    match (existing_meta, meta_block) {
+        (Some(decl), Some(rep)) => edits.push((decl.span.start, decl.span.end, rep)),
+        (Some(decl), None) => {
+            let end = if source.as_bytes().get(decl.span.end) == Some(&b'\n') {
+                decl.span.end + 1
+            } else {
+                decl.span.end
+            };
+            edits.push((decl.span.start, end, String::new()));
+        }
+        (None, Some(rep)) => to_append.push(rep),
+        (None, None) => {}
+    }
+
+    let mut result = source.to_string();
+    edits.sort_by_key(|a| std::cmp::Reverse(a.0));
+    for (start, end, rep) in edits {
+        result.replace_range(start..end, &rep);
+    }
+
+    if !to_append.is_empty() {
+        let joined = to_append.join("\n");
+        if file.header.is_empty() {
+            result = format!("{joined}\n\n{result}");
+        } else {
+            // Re-parse after in-place replacements to insert cleanly at the end of header.
+            let insert_at = tomet_ast_parser::parse_file(&result)
+                .ok()
+                .and_then(|f| f.header.last().map(|d| d.span.end))
+                .unwrap_or(0);
+            result.insert_str(insert_at, &format!("\n{joined}"));
         }
     }
 
-    format!("{new_meta_block}\n\n{source}")
+    result
 }
 
-/// Extract export configuration from `::config(...)`
+/// Extract export configuration from `::export(...)` header declaration.
 pub fn extract_tomet_config(source: &str) -> TometConfig {
     let mut config = TometConfig::default();
-    if let Some(start) = source.find("::config") {
-        if let Some(open) = source[start..].find('(') {
-            let body_start = start + open + 1;
-            if let Some(close) = source[body_start..].find(')') {
-                let body = &source[body_start..body_start + close];
-                for line in body.lines() {
-                    let trimmed = line.trim().trim_end_matches(',');
-                    if let Some((k, v)) = trimmed.split_once(':') {
-                        let key = k.trim();
-                        let val = v.trim().trim_matches('"').trim_matches('\'').to_string();
-                        if key.contains("type") {
-                            config.export_type = Some(val);
-                        } else if key.contains("path") {
-                            config.export_path = Some(val);
-                        }
-                    }
-                }
-            }
+    let Ok(file) = tomet_ast_parser::parse_file(source) else {
+        return config;
+    };
+
+    if let Some(decl) = find_header_decl(&file.header, "export") {
+        if let Some(ref args) = decl.data.args {
+            config.export_type = args.get("type").and_then(scalar_text);
+            config.export_path = args.get("path").and_then(scalar_text);
         }
     }
     config
@@ -236,14 +331,26 @@ impl ProseMirrorNode {
     }
 }
 
+fn make_element(name: &str, placement: Placement, content: Vec<Block>) -> Element {
+    Element {
+        name: Name::bare(name),
+        placement,
+        data: Data::default(),
+        content: Some(content),
+        id: None,
+        connects: Vec::new(),
+        span: Span::dummy(),
+    }
+}
+
 /// Convert Tomet markup source string to ProseMirror JSON document
 pub fn tomet_to_prosemirror(source: &str) -> anyhow::Result<ProseMirrorDoc> {
-    let doc = tomet_parser::parse_document(source)
+    let doc = tomet_ast_parser::parse_file(source)
         .map_err(|e| anyhow::anyhow!("Failed to parse Tomet document: {e}"))?;
 
     let mut content = Vec::new();
 
-    for block in &doc.blocks {
+    for block in &doc.body {
         match block {
             Block::Section(sec) => {
                 let title_nodes = inlines_to_pm_nodes(&sec.title);
@@ -283,16 +390,13 @@ fn block_to_pm_node(block: &Block) -> Option<ProseMirrorNode> {
             for item in &list.items {
                 let mut item_content = Vec::new();
 
-                // Extract block or inlines from item.element.content
-                if let Some(ref blocks) = item.element.content {
-                    for b in blocks {
-                        if let Some(n) = block_to_pm_node(b) {
-                            item_content.push(n);
-                        }
+                for b in &item.content {
+                    if let Some(n) = block_to_pm_node(b) {
+                        item_content.push(n);
                     }
                 }
 
-                // If element has no block content, check if it's empty
+                // If item has no block content, ensure an empty paragraph for ProseMirror
                 if item_content.is_empty() {
                     item_content.push(ProseMirrorNode::paragraph(Vec::new()));
                 }
@@ -314,11 +418,7 @@ fn block_to_pm_node(block: &Block) -> Option<ProseMirrorNode> {
             }
         }
         Block::Element(el) => {
-            let name_str = el
-                .sigil
-                .name()
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| "element".to_string());
+            let name_str = el.name.to_string();
 
             // Check for callout or note element
             if name_str == "callout"
@@ -371,12 +471,12 @@ fn block_to_pm_node(block: &Block) -> Option<ProseMirrorNode> {
                 text: None,
                 attrs: Some(serde_json::json!({
                     "name": name_str,
-                    "sigil": format!("{:?}", el.sigil),
                 })),
                 content: Vec::new(),
                 marks: Vec::new(),
             })
         }
+        Block::Hole(_) | Block::TypeSeat(_) | Block::Interp(_) => None,
     }
 }
 
@@ -403,7 +503,7 @@ fn inlines_to_pm_nodes(inlines: &[Inline]) -> Vec<ProseMirrorNode> {
                 nodes.push(ProseMirrorNode::text("\n"));
             }
             Inline::Element(el) => {
-                let name = el.sigil.name().map(|n| n.to_string()).unwrap_or_default();
+                let name = el.name.to_string();
                 match name.as_str() {
                     "strong" | "bold" => {
                         let text = extract_inlines_text(el);
@@ -458,6 +558,7 @@ fn inlines_to_pm_nodes(inlines: &[Inline]) -> Vec<ProseMirrorNode> {
                     }
                 }
             }
+            Inline::Hole(_) | Inline::TypeSeat(_) | Inline::Interp(_) => {}
         }
     }
     nodes
@@ -477,6 +578,7 @@ fn extract_inlines_text(el: &Element) -> String {
                         }
                         Inline::SoftBreak(_) => text.push(' '),
                         Inline::LineBreak(_) => text.push('\n'),
+                        Inline::Hole(_) | Inline::TypeSeat(_) | Inline::Interp(_) => {}
                     }
                 }
             }
@@ -517,19 +619,14 @@ pub fn prosemirror_to_tomet(doc: &ProseMirrorDoc) -> anyhow::Result<String> {
                                 .push(Block::Paragraph(Paragraph::new(inlines, Span::dummy())));
                         }
                     }
-                    let item_element = Element {
-                        sigil: Sigil::Bare,
-                        placement: tomet_ast::Placement::Block,
-                        args: None,
-                        content: Some(item_blocks),
-                        value: None,
+                    items.push(ListItem {
+                        name: None,
+                        data: Data::default(),
+                        content: item_blocks,
                         id: None,
                         connects: Vec::new(),
-                        span: Span::dummy(),
-                    };
-                    items.push(ListItem {
-                        element: item_element,
                         sublist: None,
+                        span: Span::dummy(),
                     });
                 }
                 blocks.push(Block::List(List::new(ordered, items, Span::dummy())));
@@ -548,17 +645,11 @@ pub fn prosemirror_to_tomet(doc: &ProseMirrorDoc) -> anyhow::Result<String> {
                         inner_blocks.push(Block::Paragraph(Paragraph::new(inlines, Span::dummy())));
                     }
                 }
-                let callout_el = Element {
-                    sigil: Sigil::Named(Name::bare(variant)),
-                    placement: tomet_ast::Placement::Block,
-                    args: None,
-                    content: Some(inner_blocks),
-                    value: None,
-                    id: None,
-                    connects: Vec::new(),
-                    span: Span::dummy(),
-                };
-                blocks.push(Block::Element(callout_el));
+                blocks.push(Block::Element(make_element(
+                    variant,
+                    Placement::Block,
+                    inner_blocks,
+                )));
             }
             "codeBlock" => {
                 let code_text = node
@@ -571,23 +662,17 @@ pub fn prosemirror_to_tomet(doc: &ProseMirrorDoc) -> anyhow::Result<String> {
                     vec![Inline::Raw(RawText::new(code_text, Span::dummy()))],
                     Span::dummy(),
                 ))];
-                let code_el = Element {
-                    sigil: Sigil::Named(Name::bare("code")),
-                    placement: tomet_ast::Placement::Block,
-                    args: None,
-                    content: Some(raw_content),
-                    value: None,
-                    id: None,
-                    connects: Vec::new(),
-                    span: Span::dummy(),
-                };
-                blocks.push(Block::Element(code_el));
+                blocks.push(Block::Element(make_element(
+                    "code",
+                    Placement::Block,
+                    raw_content,
+                )));
             }
             _ => {}
         }
     }
 
-    let tomet_doc = Document::new(blocks, Span::dummy());
+    let tomet_doc = File::new(Vec::new(), blocks, Span::dummy());
     Ok(tomet_printer::document_to_tm(&tomet_doc))
 }
 
@@ -607,33 +692,21 @@ fn pm_nodes_to_inlines(nodes: &[ProseMirrorNode]) -> Vec<Inline> {
                     vec![Inline::Text(Text::new(text, Span::dummy()))],
                     Span::dummy(),
                 );
-                let el = Element {
-                    sigil: Sigil::Named(Name::bare("strong")),
-                    placement: tomet_ast::Placement::Inline,
-                    args: None,
-                    content: Some(vec![Block::Paragraph(child_paragraph)]),
-                    value: None,
-                    id: None,
-                    connects: Vec::new(),
-                    span: Span::dummy(),
-                };
-                inlines.push(Inline::Element(el));
+                inlines.push(Inline::Element(make_element(
+                    "strong",
+                    Placement::Inline,
+                    vec![Block::Paragraph(child_paragraph)],
+                )));
             } else if is_italic {
                 let child_paragraph = Paragraph::new(
                     vec![Inline::Text(Text::new(text, Span::dummy()))],
                     Span::dummy(),
                 );
-                let el = Element {
-                    sigil: Sigil::Named(Name::bare("em")),
-                    placement: tomet_ast::Placement::Inline,
-                    args: None,
-                    content: Some(vec![Block::Paragraph(child_paragraph)]),
-                    value: None,
-                    id: None,
-                    connects: Vec::new(),
-                    span: Span::dummy(),
-                };
-                inlines.push(Inline::Element(el));
+                inlines.push(Inline::Element(make_element(
+                    "em",
+                    Placement::Inline,
+                    vec![Block::Paragraph(child_paragraph)],
+                )));
             } else {
                 inlines.push(Inline::Text(Text::new(text, Span::dummy())));
             }
@@ -694,24 +767,28 @@ mod tests {
 
     #[test]
     fn test_extract_and_inject_metadata() {
-        let source = "::meta{\n  id: test-id,\n  lang: ja\n}\n\n=[ Title ]\n";
+        let source = "::id(test-id)\n::meta(\n  lang: ja\n)\n\n=[ Title ]\n";
         let meta = extract_tomet_metadata(source);
         assert_eq!(meta.id.as_deref(), Some("test-id"));
         assert_eq!(meta.lang.as_deref(), Some("ja"));
 
         let mut updated = meta.clone();
         updated.title = Some("New Title".to_string());
-        updated.custom.insert("author".to_string(), "Alice".to_string());
+        updated
+            .custom
+            .insert("author".to_string(), "Alice".to_string());
 
         let injected = inject_tomet_metadata(source, &updated);
-        assert!(injected.contains("id: test-id"));
+        assert!(injected.contains("::id(test-id)"));
         assert!(injected.contains("title: \"New Title\""));
         assert!(injected.contains("author: \"Alice\""));
+        let reparsed = extract_tomet_metadata(&injected);
+        assert_eq!(reparsed, updated);
     }
 
     #[test]
     fn test_extract_config() {
-        let source = "::config(\n  export: {\n    type: commonmark,\n    path: \"README.md\"\n  }\n)\n";
+        let source = "::export(\n  type: commonmark\n  path: \"README.md\"\n)\n";
         let cfg = extract_tomet_config(source);
         assert_eq!(cfg.export_type.as_deref(), Some("commonmark"));
         assert_eq!(cfg.export_path.as_deref(), Some("README.md"));

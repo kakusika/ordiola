@@ -1,10 +1,11 @@
 import type { TypstCompileOutput } from "./types";
 
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const isTauri =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export async function compileTypst(
   source: string,
-  relativePath?: string
+  relativePath?: string,
 ): Promise<TypstCompileOutput> {
   if (isTauri) {
     try {
@@ -53,7 +54,7 @@ export async function compileTypst(
 export async function exportTypstPdf(
   source: string,
   relativePath: string,
-  outputPath: string
+  outputPath: string,
 ): Promise<void> {
   if (!isTauri) {
     throw new Error("PDF export is only available in the desktop application");

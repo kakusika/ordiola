@@ -1,20 +1,20 @@
 [package]
-name = "ordiola-core"
-version.workspace = true
-edition.workspace = true
+name                   = "ordiola-core"
+version.workspace      = true
+edition.workspace      = true
 rust-version.workspace = true
-license.workspace = true
+license.workspace      = true
 
 [dependencies]
-tomet-ast = { workspace = true }
-tomet-parser = { workspace = true }
-tomet-printer = { workspace = true }
-tomet-workspace = { workspace = true }
+tomet-ast        = { workspace = true }
+tomet-ast-parser = { workspace = true }
+tomet-printer    = { workspace = true }
+tomet-span       = { workspace = true }
 
-serde = { workspace = true }
+anyhow     = { workspace = true }
+ignore     = { workspace = true }
+serde      = { workspace = true }
 serde_json = { workspace = true }
-anyhow = { workspace = true }
-thiserror = { workspace = true }
-ignore = { workspace = true }
+thiserror  = { workspace = true }
 
 [dev-dependencies]

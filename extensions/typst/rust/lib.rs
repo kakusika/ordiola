@@ -1,7 +1,7 @@
 pub mod compiler;
 pub mod world;
 
-pub use compiler::{compile_source, export_pdf, TypstCompileOutput, TypstDiagnostic};
+pub use compiler::{TypstCompileOutput, TypstDiagnostic, compile_source, export_pdf};
 pub use world::TypstWorld;
 
 #[cfg(test)]
@@ -31,7 +31,10 @@ $ E = m c^2 $
 #unknown_function_that_does_not_exist()
 "#;
         let output = compile_source(source, None, None);
-        assert!(!output.success, "Compilation should fail for unknown function");
+        assert!(
+            !output.success,
+            "Compilation should fail for unknown function"
+        );
         assert!(!output.diagnostics.is_empty());
         assert_eq!(output.diagnostics[0].severity, "error");
     }
